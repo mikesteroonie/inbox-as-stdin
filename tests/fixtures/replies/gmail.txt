@@ -1,0 +1,9 @@
+Yes, go ahead — the retry cap was deliberate.
+
+On Mon, Aug 17, 2026 at 9:04 AM Backend Agent <backend@agentmail.to> wrote:
+
+> Hi Ada,
+>
+> I'm changing code you wrote and I've hit something I can't work out.
+>
+> Why is the retry capped at 3 here?

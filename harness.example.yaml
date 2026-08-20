@@ -1,0 +1,45 @@
+# harness.yaml — validated against the Zod schema in src/config.ts on load.
+# This example is the schema doc (IMPLEMENTATION.md §9). Copy it, edit it, or
+# let `harness init` write one for you. API keys never live here; they live in
+# .env as AGENTMAIL_API_KEY_<AGENT>.
+
+pod: swarm-demo
+
+# AgentMail pod id, written by `harness init`. Scopes the websocket
+# subscription. Omit it and the daemon subscribes per-inbox instead.
+# pod_id: pod_...
+
+allowlist:
+  # Tier-ask eligible: the harness may ask permission to email these domains.
+  # Everything not here and not in the roster is tier-never (§6.1).
+  # A domain covers its subdomains: yourco.dev matches mail.yourco.dev.
+  domains: [yourco.dev]
+
+# Default CC on outreach, and the address the permission gate writes to.
+requester: michael@yourco.dev
+
+budgets:
+  usd: 5                        # per task
+  max_hops: 6                   # agent-to-agent chain length before the loop guard fires
+  questions_per_person_week: 3  # per-person outreach budget
+  max_concurrent: 3             # sessions in flight; threads stay serial regardless
+
+# How outbound mail carries the envelope (§3). `headers` is right unless
+# `harness doctor` tells you your receive path strips them — then use
+# `trailer`, or `both` while you migrate.
+envelope: headers
+
+agents:
+  - name: backend
+    inbox: backend              # local part, or a full address
+    display_name: Backend Agent
+    repo: .                     # path or git URL
+    prompt: ./prompts/backend.md # appended to prompts/system.md
+    tools: [read, write, bash, send_email_to_agent, ask_code_author]
+    budgets: { usd: 10 }        # per-agent override, same shape
+
+  - name: frontend
+    inbox: frontend
+    display_name: Frontend Agent
+    repo: .
+    tools: [read, write, bash, send_email_to_agent]

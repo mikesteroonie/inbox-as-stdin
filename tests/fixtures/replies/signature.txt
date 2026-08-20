@@ -1,0 +1,6 @@
+It's a compatibility shim for the v1 API. Safe to delete once v1 is off.
+
+--
+Ada Lovelace
+Staff Engineer, YourCo
++1 555 0100

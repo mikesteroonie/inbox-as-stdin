@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.harness/
+*.tsbuildinfo
+coverage/
+harness.yaml
+DECISIONS.md

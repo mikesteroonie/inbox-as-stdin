@@ -1,0 +1,4 @@
+Please add rate limiting to the ingest endpoint.
+
+Cap it at 100 requests per minute per API key, and return 429 with a
+Retry-After header. There's a Redis instance already wired up in config.

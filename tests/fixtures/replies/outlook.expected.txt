@@ -1,0 +1,2 @@
+The cap is 3 because the upstream provider rate-limits at 5/min and we share the
+budget with the ingest job.

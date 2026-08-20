@@ -1,0 +1,7 @@
+Skip it — that file is being deleted next sprint.
+
+Sent from my iPhone
+
+> On 17 Aug 2026, at 09:04, Backend Agent <backend@agentmail.to> wrote:
+>
+> Why is the retry capped at 3 here?
