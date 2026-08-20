@@ -114,7 +114,7 @@ tests/                vitest; policy.ts and envelope.ts held at 100% branch cove
 ## Development
 
 ```bash
-npm test              # 266 tests
+npm test              # 271 tests
 npm run test:watch
 npm run typecheck
 npm run build
@@ -139,3 +139,6 @@ Two decisions worth knowing about, both recorded at their call sites:
 - **The hop counter ratchets.** A message with no envelope — a human replying mid-chain — cannot
   wind it back to zero, or a forced agent-to-agent loop could restart itself by passing through
   anything that strips headers.
+- **An unpriced model stops the task.** Spend is computed from a static table in `pricing.ts`, so a
+  model missing from it would accumulate $0 and silently disable the budget guard. Instead the run
+  fails with the model name, and `doctor` refuses a config that leaves any agent's model unpinned.

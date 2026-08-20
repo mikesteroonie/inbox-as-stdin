@@ -20,16 +20,38 @@ export interface ModelPrice {
 }
 
 /**
- * Prices are per million tokens. Keys are canonical model ids; aliases are
- * resolved by `resolveModelId` before lookup. Update deliberately — a wrong
- * number here is a wrong budget everywhere.
+ * Prices are per million tokens, first-party Anthropic API rates. Keys are
+ * canonical model ids; aliases are resolved by `resolveModelId` before lookup.
+ * Cache rates follow the published multipliers: a read is 0.1x the input rate,
+ * a 5-minute-TTL write is 1.25x.
+ *
+ * Update deliberately — a wrong number here is a wrong budget everywhere.
+ * Intro pricing is deliberately NOT used (Sonnet 5 is $2/$10 through
+ * 2026-08-31): over-estimating parks a task early, under-estimating overspends,
+ * and only one of those is a safe way to be wrong.
+ *
+ * Bedrock and Vertex are partner-operated with their own rates; a deployment on
+ * either should replace these numbers.
  */
 export const PRICES: Record<string, ModelPrice> = {
-  'claude-opus-4-1': { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-  'claude-opus-4-5': { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  'claude-sonnet-4-5': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  'claude-fable-5': { in: 10, out: 50, cacheRead: 1, cacheWrite: 12.5 },
+  'claude-mythos-5': { in: 10, out: 50, cacheRead: 1, cacheWrite: 12.5 },
+  'claude-opus-5': { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  'claude-opus-4-8': { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  'claude-opus-4-7': { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  'claude-opus-4-6': { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  'claude-sonnet-5': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  'claude-sonnet-4-6': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   'claude-haiku-4-5': { in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
 }
+
+/**
+ * What an agent runs on when `harness.yaml` pins no model. Pinning is strongly
+ * preferred: an unpinned agent inherits whatever the Agent SDK defaults to, and
+ * a model this table has never heard of stops the task rather than being
+ * charged at $0 (see `session.ts`).
+ */
+export const RECOMMENDED_MODEL = 'claude-opus-5'
 
 /** Alias → canonical id. Covers dated ids and the `-latest` style aliases. */
 export function resolveModelId(model: string): string {

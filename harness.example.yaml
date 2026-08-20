@@ -36,6 +36,10 @@ agents:
     repo: .                     # path or git URL
     prompt: ./prompts/backend.md # appended to prompts/system.md
     tools: [read, write, bash, send_email_to_agent, ask_code_author]
+    # Pin a model: the budget guard is only as good as the price on file for it,
+    # and a model missing from src/pricing.ts stops the task rather than being
+    # charged at $0. `harness doctor` fails if an agent leaves this unset.
+    model: claude-opus-5
     budgets: { usd: 10 }        # per-agent override, same shape
 
   - name: frontend
@@ -43,3 +47,4 @@ agents:
     display_name: Frontend Agent
     repo: .
     tools: [read, write, bash, send_email_to_agent]
+    model: claude-opus-5

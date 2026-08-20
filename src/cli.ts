@@ -13,7 +13,7 @@ import { Daemon } from './daemon.js'
 import { agentForInbox, inboxOf } from './dispatch.js'
 import * as envelope from './envelope.js'
 import { logger } from './log.js'
-import { PRICES, validateModels } from './pricing.js'
+import { PRICES, RECOMMENDED_MODEL, validateModels } from './pricing.js'
 import { Store } from './store.js'
 import { AgentMailTransport } from './transport/agentmail.js'
 import type { MailTransport } from './transport/types.js'
@@ -95,6 +95,7 @@ program
           display_name: display,
           repo,
           tools: ['read', 'write', 'bash', 'send_email_to_agent', 'ask_code_author'],
+          model: RECOMMENDED_MODEL,
         })
       }
 
@@ -353,6 +354,17 @@ program
       const models = cfg.agents.map((a) => a.model).filter((m): m is string => !!m)
       const result = validateModels(models)
       if (!result.ok) throw new Error(`unpriced model(s): ${result.unknown.join(', ')}`)
+      // An agent with no pinned model inherits whatever the Agent SDK defaults
+      // to, which this table may not know — and a model we cannot price stops
+      // the task at its first turn. Say so here rather than at 2am.
+      const unpinned = cfg.agents.filter((a) => !a.model).map((a) => a.name)
+      if (unpinned.length > 0) {
+        throw new Error(
+          `no model pinned for ${unpinned.join(', ')} — the budget guard can only be ` +
+            `verified against a pinned, priced model. Add \`model: ${RECOMMENDED_MODEL}\` ` +
+            `to each agent in ${opts.config}.`,
+        )
+      }
       return `${Object.keys(PRICES).length} models priced`
     })
 

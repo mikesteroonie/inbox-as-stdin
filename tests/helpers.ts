@@ -75,15 +75,19 @@ export interface Turn {
   toolUse?: boolean
 }
 
-const MODEL = 'claude-sonnet-4-5'
+export const MODEL = 'claude-sonnet-5'
 
 /**
  * A Runner that replays a fixed transcript. Every message shape the real SDK
  * emits that the harness reads — assistant text, usage, tool_use, result — is
  * produced here, so the accounting and stop paths are the real ones.
  */
-export function scripted(turns: Turn[], opts: { sessionId?: string; fail?: string } = {}): Runner {
+export function scripted(
+  turns: Turn[],
+  opts: { sessionId?: string; fail?: string; model?: string } = {},
+): Runner {
   const sessionId = opts.sessionId ?? 'sess-test'
+  const model = opts.model ?? MODEL
   return ({ ports }) => {
     let closed = false
     const iterator = (async function* (): AsyncGenerator<SDKMessage, void> {
@@ -104,7 +108,7 @@ export function scripted(turns: Turn[], opts: { sessionId?: string; fail?: strin
             id: 'msg',
             type: 'message',
             role: 'assistant',
-            model: MODEL,
+            model,
             stop_reason: null,
             stop_sequence: null,
             content: [
@@ -136,7 +140,7 @@ export function scripted(turns: Turn[], opts: { sessionId?: string; fail?: strin
         stop_reason: 'end_turn',
         total_cost_usd: 0,
         modelUsage: {
-          [MODEL]: {
+          [model]: {
             inputTokens: total.input,
             outputTokens: total.output,
             cacheReadInputTokens: 0,

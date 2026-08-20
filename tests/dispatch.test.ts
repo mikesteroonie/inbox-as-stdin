@@ -187,6 +187,20 @@ describe('§5.6-§5.8 task input, run and emit', () => {
     expect(h.store.getTask(result.taskId!)!.spent_usd).toBeGreaterThan(5)
   })
 
+  it('stops rather than charging $0 for a model it cannot price (§11)', async () => {
+    // The budget guard is only as good as the price on file. A model missing
+    // from the table would otherwise accumulate zero spend and never park.
+    h.runner = scripted([{ text: 'work', usage: EXPENSIVE }], { model: 'claude-unreleased-9' })
+    const { event } = received()
+    const result = await dispatch(h, event)
+
+    expect(h.store.getTask(result.taskId!)!.state).toBe('failed')
+    expect(h.store.getTask(result.taskId!)!.spent_usd).toBe(0)
+    const reply = h.transport.sent.find((s) => s.kind === 'reply')!
+    expect(reply.text).toContain('claude-unreleased-9')
+    expect(reply.text).toContain('src/pricing.ts')
+  })
+
   it('reports a failed session to the requester', async () => {
     h.runner = scripted([], { fail: 'the model exploded' })
     const { event } = received()

@@ -166,7 +166,23 @@ async function attemptRun(req: RunRequest, resume: string | undefined): Promise<
         if (text) lastText = text
         // Charge the turn, then check: this is the "after every tool batch"
         // point — an assistant message is emitted once per model call.
-        spent += costOfTurn(message)
+        const turn = costOfTurn(message)
+        if ('unpriced' in turn) {
+          stream.close?.()
+          return {
+            kind: 'ran',
+            outcome: {
+              kind: 'failed',
+              error:
+                `Stopped: no price on file for model "${turn.unpriced}", so the $` +
+                `${req.budgets.usd.toFixed(2)} budget cannot be enforced. Add it to ` +
+                `src/pricing.ts, or pin a priced model for this agent in harness.yaml.`,
+              spentUsd: spent,
+              ...(sessionId ? { sessionId } : {}),
+            },
+          }
+        }
+        spent += turn.cost
         const verdict = checkBudget(spent, req.budgets.usd)
         if (!verdict.ok) {
           overBudget = true
@@ -265,17 +281,26 @@ function hasToolUse(message: Extract<SDKMessage, { type: 'assistant' }>): boolea
   return Array.isArray(blocks) && blocks.some((b) => b?.type === 'tool_use')
 }
 
-/** Cost of one assistant turn from its own usage block (§11: Σ tokens × table). */
-function costOfTurn(message: Extract<SDKMessage, { type: 'assistant' }>): number {
+/**
+ * Cost of one assistant turn from its own usage block (§11: Σ tokens × table).
+ *
+ * An unpriced model returns `{ unpriced }` rather than 0. Charging $0 for a
+ * model we cannot price would silently disable the budget guard — the run would
+ * look free and never park — which is the failure §11 exists to prevent.
+ */
+function costOfTurn(
+  message: Extract<SDKMessage, { type: 'assistant' }>,
+): { cost: number } | { unpriced: string } {
   const model = message.message.model
   const usage = message.message.usage
-  if (!model || !usage || !isPriced(model)) return 0
-  return costOf(model, {
+  if (!model || !usage) return { cost: 0 }
+  if (!isPriced(model)) return { unpriced: model }
+  return { cost: costOf(model, {
     inputTokens: usage.input_tokens ?? 0,
     outputTokens: usage.output_tokens ?? 0,
     cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
     cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0,
-  })
+  }) }
 }
 
 /**
