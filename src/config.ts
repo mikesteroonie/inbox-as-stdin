@@ -45,9 +45,13 @@ export const HarnessConfigSchema = z
     /** AgentMail pod id, written by `harness init`. Falls back to `pod`. */
     pod_id: z.string().min(1).optional(),
     allowlist: z
-      .object({ domains: z.array(z.string().min(1)).default([]) })
+      .object({
+        domains: z.array(z.string().min(1)).default([]),
+        /** Individual people, for a blast radius narrower than a whole domain. */
+        emails: z.array(z.string().email()).default([]),
+      })
       .strict()
-      .default({ domains: [] }),
+      .default({ domains: [], emails: [] }),
     /** Default CC and permission-gate recipient (§6.2). */
     requester: z.string().email(),
     budgets: Budgets.default({}),

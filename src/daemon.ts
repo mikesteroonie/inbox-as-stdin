@@ -25,8 +25,18 @@ const BACKOFF_MIN_MS = 1_000
 const BACKOFF_MAX_MS = 60_000
 /** Overlap the backlog window with the cursor so nothing falls between (§11). */
 const BACKLOG_OVERLAP_MS = 120_000
+/**
+ * How often the dead-thread sweep runs on its own (SPEC §4).
+ *
+ * Sweeping on (re)connect is not enough: a daemon that holds one websocket for
+ * a month reconnects never, and would let a parked task sit past its TTL
+ * indefinitely — exactly the case the TTL exists for.
+ */
+const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 export interface DaemonOptions extends Deps {
+  /** How often the dead-thread sweep runs. Defaults to 24h; lowered in tests. */
+  sweepIntervalMs?: number
   /** Test seam for backoff sleeps. */
   sleep?: (ms: number) => Promise<void>
   /** Test seam for jitter. */
@@ -110,6 +120,7 @@ export class ThreadQueue {
 export class Daemon {
   private readonly queue: ThreadQueue
   private subscriptions: Subscription[] = []
+  private sweepTimer: ReturnType<typeof setInterval> | undefined
   private stopped = false
   private attempt = 0
   private readonly sleep: (ms: number) => Promise<void>
@@ -143,6 +154,7 @@ export class Daemon {
 
   /** Run until `stop()`. Resolves when stopped. */
   async run(): Promise<void> {
+    this.startSweepTimer()
     while (!this.stopped) {
       try {
         await this.connect()
@@ -161,8 +173,27 @@ export class Daemon {
     await this.queue.drain()
   }
 
+  /**
+   * The sweep also runs on its own clock, not just on (re)connect — see
+   * SWEEP_INTERVAL_MS. Errors inside it are logged, never thrown: an
+   * unhandled rejection on a timer would take the daemon down.
+   */
+  private startSweepTimer(): void {
+    if (this.sweepTimer !== undefined) return
+    const every = this.opts.sweepIntervalMs ?? SWEEP_INTERVAL_MS
+    this.sweepTimer = setInterval(() => {
+      void this.sweep()
+    }, every)
+    // Do not hold the event loop open on the timer alone.
+    this.sweepTimer.unref?.()
+  }
+
   stop(): void {
     this.stopped = true
+    if (this.sweepTimer !== undefined) {
+      clearInterval(this.sweepTimer)
+      this.sweepTimer = undefined
+    }
     for (const sub of this.subscriptions) sub.stop()
     this.subscriptions = []
     this.disconnected?.()

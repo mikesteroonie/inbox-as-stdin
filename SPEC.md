@@ -59,7 +59,7 @@ open pattern rather than a vendor demo).
 | Swarm/project scope | pod; WS `subscribe` and webhooks both scope by `pod_id` |
 | Session | `thread_id`; thread doubles as the human-legible audit log |
 | Wake-up | WS `subscribe` (laptop, no tunnel) or `message.received` webhook (deployed) |
-| Protocol envelope | custom send `headers` (`x-task-id`, `x-hops`, `x-agent-protocol`) |
+| Protocol envelope | custom send `headers` (`x-harness-proto`, `x-task-id`, `x-hops`, `x-in-reply-to-question`) |
 | Workflow state | thread `add_labels`/`remove_labels` (`state/awaiting-human`, `state/replied`) |
 | Artifacts | attachments (patch.diff, test logs) |
 | Untrusted-input gate | Agent Armor verdicts; `hold_until_scanned` on agent inboxes |

@@ -11,6 +11,42 @@ import { BACKEND, REQUESTER, harness, scripted } from './helpers.js'
 const deliver = (h: ReturnType<typeof harness>, text: string, at = Date.now()) =>
   h.transport.deliver({ inboxId: BACKEND, from: REQUESTER, text, subject: text, timestamp: at })
 
+describe('the dead-thread sweep runs on a timer (SPEC §4)', () => {
+  it('sweeps without a reconnect — the steady-state case', async () => {
+    const h = harness()
+    h.runner = scripted([{ text: 'done' }])
+    // A task parked long enough to be past the TTL.
+    const daemon = new Daemon({ ...h, sweepIntervalMs: 20 })
+    deliver(h, 'a task')
+    await daemon.runOnce()
+    const taskId = h.store.listTasks()[0]!.task_id
+    h.store.updateTask(taskId, { state: 'awaiting-human' }, Date.now() - 15 * 24 * 3600 * 1000)
+
+    // run() holds one connection and never reconnects; only the timer fires.
+    const running = daemon.run()
+    await new Promise((r) => setTimeout(r, 80))
+    expect(h.store.getTask(taskId)!.state).toBe('failed')
+
+    daemon.stop()
+    await running
+  })
+
+  it('stops sweeping once the daemon stops', async () => {
+    const h = harness()
+    const daemon = new Daemon({ ...h, sweepIntervalMs: 10 })
+    const running = daemon.run()
+    await new Promise((r) => setTimeout(r, 25))
+    daemon.stop()
+    await running
+
+    // A task that goes stale after stop() must not be touched.
+    h.store.createTask({ task_id: 'aaaaaaaa', agent: 'backend', state: 'awaiting-human' })
+    h.store.updateTask('aaaaaaaa', {}, Date.now() - 15 * 24 * 3600 * 1000)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(h.store.getTask('aaaaaaaa')!.state).toBe('awaiting-human')
+  })
+})
+
 describe('backlog recovery (§11)', () => {
   it('--once processes the whole backlog and exits', async () => {
     const h = harness()

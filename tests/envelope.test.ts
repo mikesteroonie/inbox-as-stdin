@@ -102,13 +102,18 @@ describe('parse', () => {
     })
   })
 
-  it("accepts SPEC's x-agent-protocol as an alias for the proto marker", () => {
+  it('accepts the deprecated x-agent-protocol spelling on parse', () => {
     const env = envelope.parse({ 'x-agent-protocol': '1', 'x-task-id': TASK, 'x-hops': '2' })
     expect(env).toEqual({ human: false, proto: '1', taskId: TASK, hops: 2 })
   })
 
   it('prefers x-harness-proto when both spellings are present', () => {
     expect(envelope.parse({ 'x-harness-proto': '1', 'x-agent-protocol': '9' }).proto).toBe('1')
+  })
+
+  it('never emits the deprecated spelling', () => {
+    expect(envelope.encodeHeaders({ hops: 1 })).not.toHaveProperty('x-agent-protocol')
+    expect(envelope.encode({ hops: 1 }, 'b', 'both').headers).not.toHaveProperty('x-agent-protocol')
   })
 
   it('ignores non-string header values', () => {

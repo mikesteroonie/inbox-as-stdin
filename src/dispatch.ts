@@ -162,6 +162,7 @@ export async function dispatch(deps: Deps, event: MailEvent): Promise<DispatchRe
     requester: deps.cfg.requester,
     roster: rosterAddresses(deps.cfg),
     allowlistDomains: deps.cfg.allowlist.domains,
+    allowlistEmails: deps.cfg.allowlist.emails,
     activeThreadParticipants: activeThreadParticipants(deps, thread),
   })
   if (!sender.ok) {
@@ -796,6 +797,7 @@ async function sendToAgent(
     roster,
     threadParticipants: thread?.participants ?? [],
     allowlistDomains: deps.cfg.allowlist.domains,
+    allowlistEmails: deps.cfg.allowlist.emails,
   })
   if (verdict.tier !== 'auto') {
     return {

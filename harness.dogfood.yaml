@@ -1,0 +1,46 @@
+# Dogfood config (SPEC §7 Q4): the harness pointed at its own repository, with
+# exactly one human reachable. Copy to `harness.yaml`, fill in the inbox
+# addresses `harness init` gives you, and put the keys in `.env`.
+#
+#     cp harness.dogfood.yaml harness.yaml
+#     harness doctor
+#     harness up
+#
+# Blast radius is one person by construction: `allowlist.emails` names a single
+# address and `allowlist.domains` is empty, so every other human on earth is
+# tier-never. The first blame-outreach email this pod sends can only go to the
+# address below.
+
+pod: inbox-as-stdin
+
+allowlist:
+  # Deliberately empty. A domain entry here would make every address at that
+  # domain tier-ask; the point of this config is that exactly one human is
+  # reachable.
+  domains: []
+  emails: [michael@agentmail.cc]
+
+requester: michael@agentmail.cc
+
+budgets:
+  usd: 5
+  max_hops: 6
+  questions_per_person_week: 3
+  max_concurrent: 3
+  max_participants: 10
+  dead_thread_ttl_days: 14
+
+envelope: headers
+
+# This repo has a remote and the branch is the deliverable, so let the agent
+# open PRs. Set to `never` if you would rather read patches first.
+pr: auto
+
+agents:
+  - name: backend
+    # Replace with the address `harness init` prints for this inbox.
+    inbox: backend
+    display_name: Backend Agent
+    repo: .
+    tools: [read, write, bash, send_email_to_agent, ask_code_author]
+    model: claude-opus-5

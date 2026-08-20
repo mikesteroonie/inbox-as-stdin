@@ -13,8 +13,22 @@ describe('validateConfig', () => {
   it('accepts a minimal config and fills defaults', () => {
     const cfg = validateConfig(minimal)
     expect(cfg.allowlist.domains).toEqual([])
+    expect(cfg.allowlist.emails).toEqual([])
     expect(cfg.envelope).toBe('headers')
     expect(cfg.agents[0]!.repo).toBe('.')
+  })
+
+  it('validates the dogfood config, and it reaches exactly one human', () => {
+    const cfg = validateConfig(parseYaml(readFileSync('harness.dogfood.yaml', 'utf8')))
+    expect(cfg.allowlist.domains).toEqual([])
+    expect(cfg.allowlist.emails).toEqual(['michael@agentmail.cc'])
+    expect(cfg.requester).toBe('michael@agentmail.cc')
+  })
+
+  it('rejects a non-address in the email allowlist', () => {
+    expect(() =>
+      validateConfig({ ...minimal, allowlist: { emails: ['not-an-address'] } }),
+    ).toThrow(ConfigError)
   })
 
   it('validates the shipped example', () => {

@@ -127,6 +127,7 @@ async function gate(deps: OutreachDeps, email: string): Promise<Gate> {
     recipient: email,
     roster: rosterAddresses(deps.cfg),
     allowlistDomains: deps.cfg.allowlist.domains,
+    allowlistEmails: deps.cfg.allowlist.emails,
   })
   if (verdict.tier === 'never') {
     log.warn('outreach denied by policy', { email, reason: verdict.reason })

@@ -122,7 +122,7 @@ tests/                vitest; policy.ts and envelope.ts held at 100% branch cove
 ## Development
 
 ```bash
-npm test              # 298 tests
+npm test              # 308 tests
 npm run test:watch
 npm run typecheck
 npm run build
@@ -132,16 +132,35 @@ The pipeline tests run the real dispatch code against an in-memory transport and
 session transcript, so the §10 acceptance criteria — dedupe, outage recovery, over-budget parking,
 the full permission/answer/bounce flow, the A↔B hop cap — are executable rather than aspirational.
 
+## Limitations
+
+- **Provider-side hold is not wired up.** SPEC §3 maps the untrusted-input gate to Agent Armor
+  verdicts plus `hold_until_scanned` on agent inboxes. Armor policy is currently org-level and
+  operationally gated, with no inbox-level surface — so provider-side hold requires an AgentMail
+  feature that is not yet public. The harness-side gate is the intended behavior in the meantime:
+  dispatch step 3 holds a flagged message, labels the thread `state/held`, and notifies the
+  requester before anything reaches a prompt. `armorOf` in `transport/agentmail.ts` already reads a
+  verdict from headers or labels, so adopting the inbox-level setting when it ships is a change to
+  `init`, not to the pipeline.
+- **No webhook receiver.** Wake-up is the websocket only. SPEC §3 lists a `message.received`
+  webhook as the deployed alternative; `dispatch()` takes an event and its dependencies with no
+  daemon involved, so a webhook handler is a thin adapter rather than a rewrite — but it is not
+  written yet.
+- **The AgentMail transport has not run against a live account.** It is written against the real
+  SDK's types and typechecks clean, but `harness doctor` is what proves a deployment — including
+  the SPEC §7 Q1 header round-trip and the Q2 per-inbox key scoping.
+
 ## Design notes
 
 [`SPEC.md`](SPEC.md) records the design decisions; [`IMPLEMENTATION.md`](IMPLEMENTATION.md) is the
 construction spec built from it — interfaces, schemas, formats, per-milestone acceptance criteria.
 Where they conflict, SPEC.md wins.
 
-They conflict in two places, both naming, both reconciled here rather than adjudicated: SPEC calls
-the protocol header `x-agent-protocol` where IMPLEMENTATION calls it `x-harness-proto` (we emit the
-latter and **accept either** on parse), and SPEC names the terminal thread label `state/replied`
-where IMPLEMENTATION's pipeline said `done` (we use SPEC's).
+They conflicted in two places, both naming, both now settled in the documents themselves:
+`x-harness-proto` is the protocol header (SPEC §3 has been updated to match; `x-agent-protocol` is
+still accepted on parse, deprecated, and carries a removal note in `envelope.ts`), and
+`state/replied` is the terminal thread label (SPEC's name, which describes what happened on the
+thread rather than the internal task state).
 
 Three decisions worth knowing about, all recorded at their call sites:
 

@@ -19,9 +19,14 @@ export const PROTO_VERSION = '1'
 export const HEADER = {
   proto: 'x-harness-proto',
   /**
-   * SPEC §3 names this header `x-agent-protocol` where IMPLEMENTATION.md §3
-   * names it `x-harness-proto`. We emit the latter and accept either on parse,
-   * so mail from a peer built against either document routes correctly.
+   * @deprecated Legacy spelling from an early draft of SPEC §3, which now says
+   * `x-harness-proto`. Accepted on parse only — never emitted — so that mail
+   * already in flight from a peer built against the old draft still routes.
+   *
+   * REMOVE once no deployment has sent mail carrying it for a full
+   * `budgets.dead_thread_ttl_days` window (default 14 days): past that no live
+   * thread can still be quoting it. Deleting this constant and its branch in
+   * `parse` is the whole removal.
    */
   protoAlias: 'x-agent-protocol',
   taskId: 'x-task-id',

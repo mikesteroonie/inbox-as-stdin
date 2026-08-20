@@ -106,6 +106,28 @@ describe('classifyRecipient (§6.1, first match wins)', () => {
     })
   })
 
+  it('3a. an individually allowlisted address is ask', () => {
+    expect(
+      classifyRecipient({ recipient: 'Michael <MICHAEL@agentmail.cc>', roster, allowlistEmails: ['michael@agentmail.cc'] }),
+    ).toEqual({ tier: 'ask', reason: 'allowlist-email' })
+  })
+
+  it('3a. naming one address does not open their domain (dogfood blast radius)', () => {
+    expect(
+      classifyRecipient({
+        recipient: 'someone-else@agentmail.cc',
+        roster,
+        allowlistEmails: ['michael@agentmail.cc'],
+      }),
+    ).toEqual({ tier: 'never', reason: 'default-deny' })
+  })
+
+  it('3a. skips unparseable entries in the email allowlist', () => {
+    expect(
+      classifyRecipient({ recipient: 'a@b.dev', allowlistEmails: ['garbage'] }).tier,
+    ).toBe('never')
+  })
+
   it('3. an allowlisted domain is ask', () => {
     expect(classifyRecipient({ recipient: 'ada@yourco.dev', roster, allowlistDomains })).toEqual({
       tier: 'ask',
@@ -272,6 +294,16 @@ describe('checkSender (§5.5 inbound gate)', () => {
   })
   it('accepts an allowlisted domain', () => {
     expect(checkSender({ ...base, from: 'ada@yourco.dev' }).reason).toBe('allowlisted')
+  })
+  it('accepts an individually allowlisted address', () => {
+    expect(
+      checkSender({ from: 'michael@agentmail.cc', allowlistEmails: ['michael@agentmail.cc'] }),
+    ).toEqual({ ok: true, reason: 'allowlisted-email' })
+  })
+  it('refuses a colleague of an individually allowlisted address', () => {
+    expect(
+      checkSender({ from: 'other@agentmail.cc', allowlistEmails: ['michael@agentmail.cc'] }).ok,
+    ).toBe(false)
   })
   it('accepts a participant of an active thread', () => {
     expect(

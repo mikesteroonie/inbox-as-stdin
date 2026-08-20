@@ -97,6 +97,7 @@ export async function sendToPodAgent(
     recipient: target,
     roster: rosterAddresses(deps.cfg),
     allowlistDomains: deps.cfg.allowlist.domains,
+    allowlistEmails: deps.cfg.allowlist.emails,
   })
   if (verdict.tier !== 'auto') {
     return {
