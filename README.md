@@ -122,7 +122,7 @@ tests/                vitest; policy.ts and envelope.ts held at 100% branch cove
 ## Development
 
 ```bash
-npm test              # 319 tests
+npm test              # 326 tests
 npm run test:watch
 npm run typecheck
 npm run build
@@ -148,7 +148,9 @@ the full permission/answer/bounce flow, the A↔B hop cap — are executable rat
   written yet.
 - **The AgentMail transport has not run against a live account.** It is written against the real
   SDK's types and typechecks clean, but `harness doctor` is what proves a deployment — including
-  the SPEC §7 Q1 header round-trip and the Q2 per-inbox key scoping.
+  the SPEC §7 Q1 header round-trip and the Q2 per-inbox key scoping. Everything downstream of the
+  transport — the pipeline, a real Agent SDK session, the worktree, the patch, cost accounting —
+  has been run end to end against a live model with mail stubbed out.
 
 ## Design notes
 

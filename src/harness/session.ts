@@ -130,13 +130,36 @@ type Attempt =
 
 async function attemptRun(req: RunRequest, resume: string | undefined): Promise<Attempt> {
   const harnessServer = createHarnessTools(req.ports)
+  const granted = new Set(resolveTools(req.agent.tools))
   const options: Options = {
     cwd: req.worktree,
     systemPrompt: req.systemPrompt,
-    allowedTools: resolveTools(req.agent.tools),
+    // Deliberately NOT listed as bare `allowedTools` entries: a bare entry
+    // auto-approves the tool before `canUseTool` is consulted, which would
+    // make the gate below decorative for exactly the tools that matter.
+    // Routing everything through the callback keeps one enforcement point.
     mcpServers: { [SERVER_NAME]: harnessServer },
-    permissionMode: 'bypassPermissions',
-    allowDangerouslySkipPermissions: true,
+    /**
+     * An autonomous session has nobody to prompt, so it needs a programmatic
+     * answer to "may I use this tool". This is that answer: the grants in
+     * `harness.yaml` decide, and anything else is denied with a reason the
+     * model can act on.
+     *
+     * Deliberately NOT `bypassPermissions`. Skipping permission checks is
+     * refused outright when the process runs as root, which is precisely where
+     * a daemon lives — and "grant exactly what the operator listed" is the
+     * behaviour this project wants anyway.
+     */
+    canUseTool: async (toolName, input) => {
+      if (granted.has(toolName)) return { behavior: 'allow', updatedInput: input }
+      return {
+        behavior: 'deny',
+        message:
+          `"${toolName}" is not granted to this agent. Its tools are: ` +
+          `${[...granted].join(', ')}. Work with those, or explain in your reply what you ` +
+          `would need and why.`,
+      }
+    },
     // The session works in a throwaway worktree; nothing outside it should
     // leak in, so filesystem settings and project CLAUDE.md files stay off
     // unless the agent's own repo is what we mean to load.
