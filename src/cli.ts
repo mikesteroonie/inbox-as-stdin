@@ -358,7 +358,7 @@ program
         console.log(`  ok   ${name}${detail ? ` — ${detail}` : ''}`)
       } catch (err) {
         failures++
-        console.log(`  FAIL ${name} — ${err instanceof Error ? err.message : String(err)}`)
+        console.log(`  FAIL ${name} — ${describeError(err)}`)
       }
     }
 
@@ -464,6 +464,68 @@ async function roundTrip(cfg: HarnessConfig): Promise<string> {
 }
 
 /* -------------------------------------------------------------- helpers */
+
+/**
+ * One readable line out of anything a client can throw.
+ *
+ * The checklist is the diagnostic, so a failure that renders as
+ * `[object Object]` or spills a multi-line body across the other rows costs
+ * exactly the information the command exists to give. SDK errors carry their
+ * detail on `body` rather than `message`, and a websocket can reject with a
+ * plain object that is not an Error at all.
+ */
+export function describeError(err: unknown): string {
+  const line = collapse(messageOf(err))
+  // A blocked host is the one failure people misread as a broken key.
+  const hint = /not in allowlist|CONNECT tunnel failed|ENOTFOUND|EAI_AGAIN/i.test(line)
+    ? ' (network egress is blocking the host, not the API key)'
+    : ''
+  return (line.length > 240 ? `${line.slice(0, 240)}…` : line) + hint
+}
+
+function messageOf(err: unknown): string {
+  if (typeof err === 'string') return err
+  if (err === null || err === undefined) return String(err)
+  if (typeof err !== 'object') return String(err)
+
+  const record = err as Record<string, unknown>
+  const message = typeof record.message === 'string' ? record.message.trim() : ''
+  const body =
+    typeof record.body === 'string'
+      ? record.body.trim()
+      : record.body && typeof record.body === 'object'
+        ? JSON.stringify(record.body)
+        : ''
+
+  // SDK errors put the useful half on `body` and a bare status on `message`,
+  // but sometimes `message` already quotes the body — do not say it twice.
+  if (message && body) {
+    return collapse(message).includes(collapse(body)) ? message : `${message}: ${body}`
+  }
+  if (message || body) return message || body
+
+  // Not an Error at all: websocket rejections can be plain event-ish objects
+  // with nothing on `message`. Pull whatever identifies them.
+  const parts = ['reason', 'code', 'type', 'name', 'statusCode', 'status', 'error']
+    .map((key) => (record[key] === undefined ? '' : `${key}=${stringifyShallow(record[key])}`))
+    .filter(Boolean)
+  if (parts.length > 0) return parts.join(' ')
+
+  const keys = Object.keys(record)
+  if (keys.length > 0) return JSON.stringify(record)
+  return err instanceof Error ? `${err.name} (no message)` : 'unknown error (no message, no fields)'
+}
+
+function stringifyShallow(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || typeof value !== 'object') return String(value)
+  const nested = (value as Record<string, unknown>).message
+  return typeof nested === 'string' ? nested : JSON.stringify(value)
+}
+
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
 
 function load(path: string): HarnessConfig {
   try {
