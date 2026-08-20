@@ -16,7 +16,14 @@ import { budgetsFor } from './config.js'
 import * as envelope from './envelope.js'
 import { mintTaskId } from './ids.js'
 import { logger } from './log.js'
-import { checkHops, checkSender, classifyRecipient, normalizeAddress } from './policy.js'
+import {
+  checkHops,
+  checkParticipants,
+  checkSender,
+  classifyRecipient,
+  isDeadThread,
+  normalizeAddress,
+} from './policy.js'
 import { extractReply, fenceUntrusted } from './reply.js'
 import type { Store, TaskRow } from './store.js'
 import { LABEL, type MailEvent, type MailTransport, type Message, type Thread } from './transport/types.js'
@@ -37,6 +44,7 @@ import { blameRegion, headSha } from './harness/blame.js'
 import { renderPrompt } from './harness/prompts.js'
 import { runSession, type RunOutcome, type Runner } from './harness/session.js'
 import type { AskResult, SendResult } from './harness/tools.js'
+import { openPullRequest } from './harness/pr.js'
 import { ensureWorktree, patchFor, statusFor, type Worktree } from './harness/worktree.js'
 
 const log = logger('dispatch')
@@ -64,6 +72,7 @@ export type Disposition =
   | 'duplicate'
   | 'held-by-armor'
   | 'hop-limit'
+  | 'participant-limit'
   | 'sender-refused'
   | 'no-agent'
   | 'outreach-resume'
@@ -139,6 +148,13 @@ export async function dispatch(deps: Deps, event: MailEvent): Promise<DispatchRe
   const hops = checkHops(env.hops, budgets.maxHops)
   if (!hops.ok) {
     return haltOnHops(deps, agent, message, env, hops.cap)
+  }
+
+  // SPEC §4 — participant cap. Checked with the hop cap, before any routing:
+  // a thread this wide fans every reply out to everyone on it.
+  const participants = checkParticipants(thread.participants.length, budgets.maxParticipants)
+  if (!participants.ok) {
+    return haltOnParticipants(deps, agent, message, env, participants)
   }
 
   const sender = checkSender({
@@ -374,10 +390,18 @@ async function runTaskInput(
   thread: Thread,
   env: envelope.Envelope,
 ): Promise<DispatchResult> {
-  const existing =
+  const budgets = budgetsFor(deps.cfg, agent)
+  const now = (deps.now ?? Date.now)()
+  const candidate =
     (env.taskId ? deps.store.getTask(env.taskId) : undefined) ??
     deps.store.getActiveTaskByThread(message.threadId) ??
     deps.store.getLatestTaskByThread(message.threadId)
+  // A task past the TTL is abandoned, not dormant: start a fresh one rather
+  // than resuming a session whose context is weeks stale (SPEC §4).
+  const existing =
+    candidate && isDeadThread(candidate.updated_at, budgets.deadThreadTtlDays, now)
+      ? undefined
+      : candidate
 
   const task =
     existing ??
@@ -427,7 +451,7 @@ async function execute(
   if (task.thread_id) {
     await deps.transports
       .get(agent.name)!
-      .label(inboxOf(agent), task.thread_id, [LABEL.running], [LABEL.awaitingHuman, LABEL.done, LABEL.failed])
+      .label(inboxOf(agent), task.thread_id, [LABEL.running], [LABEL.awaitingHuman, LABEL.replied, LABEL.failed])
       .catch(() => undefined)
   }
 
@@ -496,8 +520,25 @@ async function emit(
 
   const failed = outcome.kind === 'failed' || outcome.kind === 'over-budget'
   const state = failed ? 'failed' : 'done'
+
+  // SPEC §4.6 — reply with the PR link when there is one. The patch is the
+  // contract and ships either way (IMPLEMENTATION §11), so a PR that cannot be
+  // opened costs a line of prose, not the deliverable.
+  const pr =
+    !failed && wt && patch.trim() && deps.cfg.pr !== 'never'
+      ? await openPullRequest({
+          worktree: wt,
+          taskId: task.task_id,
+          title: prTitle(ctx, task.task_id),
+          body: prBody(outcome, ctx),
+        })
+      : undefined
+  if (pr?.kind === 'opened') log.info('pr link included', { taskId: task.task_id, url: pr.url })
+
   const header = summaryHeader(outcome, current, status)
-  const body = `${header}\n\n${outcome.kind === 'failed' ? outcome.error : outcome.text}`.trim()
+  const prLine = pr?.kind === 'opened' ? `\n\n**Pull request:** ${pr.url}` : ''
+  const body =
+    `${header}${prLine}\n\n${outcome.kind === 'failed' ? outcome.error : outcome.text}`.trim()
 
   const { headers, text } = envelope.encode(
     { taskId: task.task_id, hops },
@@ -536,7 +577,7 @@ async function emit(
   if (threadId) {
     deps.store.putSession(threadId, { summary: firstParagraph(outcome.kind === 'failed' ? outcome.error : outcome.text) })
     await transport
-      .label(inbox, threadId, [failed ? LABEL.failed : LABEL.done], [LABEL.running, LABEL.awaitingHuman])
+      .label(inbox, threadId, [failed ? LABEL.failed : LABEL.replied], [LABEL.running, LABEL.awaitingHuman])
       .catch(() => undefined)
   }
   log.info('replied', { taskId: task.task_id, state, hops, patchBytes: patch.length })
@@ -559,6 +600,23 @@ function summaryHeader(
     return `**Task failed.** Spent ${spend}; ${diff}.`
   }
   return `**Task ${task.task_id}** — ${diff}, ${spend}.`
+}
+
+function prTitle(ctx: FullContext, taskId: string): string {
+  const subject = ctx.taskSubject.replace(/^(re|fwd):\s*/i, '').trim()
+  return subject && subject !== `task ${taskId}` ? subject.slice(0, 72) : `Task ${taskId}`
+}
+
+function prBody(outcome: RunOutcome, ctx: FullContext): string {
+  // `emit` only opens a PR on a finished run, but keep this total: a parked
+  // outcome carries `summary` rather than `text`.
+  const summary =
+    outcome.kind === 'failed' ? outcome.error : outcome.kind === 'parked' ? outcome.summary : outcome.text
+  return (
+    `${summary.trim()}\n\n---\n` +
+    `Opened by the email harness for task \`${ctx.task.task_id}\`, from a request on thread ` +
+    `\`${ctx.threadId}\`. The requester is on that thread and is the person to ask about intent.\n`
+  )
 }
 
 function firstParagraph(text: string): string {
@@ -602,6 +660,87 @@ async function dispatchBounce(
       (task ? `Task ${task.task_id} has been marked failed.\n` : ''),
   })
   return { disposition: 'bounce-handled', ...(task ? { taskId: task.task_id } : {}) }
+}
+
+/* --------------------------------------------- SPEC §4 participant cap */
+
+async function haltOnParticipants(
+  deps: Deps,
+  agent: AgentConfig,
+  message: Message,
+  env: envelope.Envelope,
+  verdict: { count: number; cap: number },
+): Promise<DispatchResult> {
+  const task =
+    (env.taskId ? deps.store.getTask(env.taskId) : undefined) ??
+    deps.store.getActiveTaskByThread(message.threadId)
+  const key = task?.task_id ?? message.threadId
+  if (task) deps.store.updateTask(task.task_id, { state: 'failed' })
+  if (deps.store.claimNotice(key, 'participant-limit')) {
+    await notify(deps, agent, {
+      subject: `Too many people on thread${task ? ` for task ${task.task_id}` : ''}`,
+      text:
+        `Thread ${message.threadId} now has ${verdict.count} participants, past the cap of ` +
+        `${verdict.cap}. Nothing was run.\n\n` +
+        `A thread this wide sends every agent reply to everyone on it. Raise ` +
+        `budgets.max_participants in harness.yaml if the audience is intentional, or start a ` +
+        `narrower thread.`,
+    })
+  }
+  log.warn('participant cap reached', {
+    thread: message.threadId,
+    participants: verdict.count,
+    cap: verdict.cap,
+  })
+  return { disposition: 'participant-limit', ...(task ? { taskId: task.task_id } : {}) }
+}
+
+/* ---------------------------------------------- SPEC §4 dead-thread TTL */
+
+/**
+ * Close out tasks nobody has touched inside the TTL. A parked question whose
+ * human never answered would otherwise hold a session open forever; this ends
+ * it, tells the requester once, and leaves the thread labelled.
+ */
+export async function expireDeadThreads(deps: Deps, now = (deps.now ?? Date.now)()): Promise<string[]> {
+  const expired: string[] = []
+  for (const agent of deps.cfg.agents) {
+    const budgets = budgetsFor(deps.cfg, agent)
+    const transport = deps.transports.get(agent.name)
+    if (!transport) continue
+    for (const task of deps.store.listStaleTasks(now)) {
+      if (task.agent !== agent.name) continue
+      if (!isDeadThread(task.updated_at, budgets.deadThreadTtlDays, now)) continue
+
+      const pending = deps.store
+        .listQuestions(task.task_id)
+        .filter((q) => q.state === 'sent' || q.state === 'pending-permission')
+      for (const q of pending) deps.store.updateQuestion(q.question_id, { state: 'skipped' })
+      deps.store.updateTask(task.task_id, { state: 'failed' }, now)
+      expired.push(task.task_id)
+
+      if (task.thread_id) {
+        await transport
+          .label(inboxOf(agent), task.thread_id, [LABEL.failed], [LABEL.running, LABEL.awaitingHuman])
+          .catch(() => undefined)
+      }
+      if (deps.store.claimNotice(task.task_id, 'dead-thread', now)) {
+        const days = budgets.deadThreadTtlDays
+        await notify(deps, agent, {
+          subject: `Closing task ${task.task_id} — no activity for ${days} days`,
+          text:
+            `Task ${task.task_id} has had no activity for ${days} days, so I have closed it.\n\n` +
+            (pending.length > 0
+              ? `It was waiting on an answer from ${[...new Set(pending.map((q) => q.asked_email))].join(', ')}, ` +
+                `which never came.\n\n`
+              : '') +
+            `Spent $${task.spent_usd.toFixed(2)}. Reply on the thread to start it again.`,
+        })
+      }
+      log.info('dead thread expired', { taskId: task.task_id, days: budgets.deadThreadTtlDays })
+    }
+  }
+  return expired
 }
 
 /* ------------------------------------------------------ §5.5 hop limit */

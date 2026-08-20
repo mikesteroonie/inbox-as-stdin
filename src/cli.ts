@@ -321,6 +321,28 @@ function indent(text: string): string {
     .join('\n')
 }
 
+/* ------------------------------------------------------------------ mcp */
+
+program
+  .command('mcp')
+  .description('serve send_email_to_agent over MCP (stdio) — join a swarm without the daemon')
+  .requiredOption('--agent <name>', 'which agent inbox to send from')
+  .option('-c, --config <path>', 'config path', 'harness.yaml')
+  .action(async (opts) => {
+    const cfg = load(opts.config)
+    const agent = cfg.agents.find((a) => a.name === opts.agent) ?? agentForInbox(cfg, opts.agent)
+    if (!agent) {
+      console.error(`No agent "${opts.agent}". Known: ${cfg.agents.map((a) => a.name).join(', ')}`)
+      process.exitCode = 1
+      return
+    }
+    // stdout is the MCP transport from here on — logs must not land in it.
+    process.env.HARNESS_LOG_LEVEL = 'error'
+    process.env.HARNESS_LOG_STDERR = '1'
+    const { serveStdio } = await import('./mcp.js')
+    await serveStdio({ cfg, agent, transport: transportFor(cfg, agent.name) })
+  })
+
 /* --------------------------------------------------------------- doctor */
 
 program

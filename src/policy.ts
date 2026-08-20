@@ -158,6 +158,35 @@ export function weekKey(at: Date | number = Date.now()): string {
   return `${utc.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
 }
 
+export interface ParticipantVerdict {
+  ok: boolean
+  count: number
+  cap: number
+}
+
+/**
+ * SPEC §4 — participant cap per thread. A thread that has accumulated a crowd
+ * is a CC storm, not a task: every reply then fans out to everyone on it.
+ */
+export function checkParticipants(count: number, cap: number): ParticipantVerdict {
+  const c = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
+  const k = Number.isFinite(cap) ? Math.max(0, Math.trunc(cap)) : 0
+  return { ok: c <= k, count: c, cap: k }
+}
+
+/**
+ * SPEC §4 — dead-thread TTL. A task nobody has touched for this long is not
+ * waiting, it is abandoned: a parked question whose human never answered, or a
+ * thread that went quiet. Expiring it closes the loop instead of leaving a
+ * session parked forever.
+ */
+export function isDeadThread(updatedAt: number, ttlDays: number, now = Date.now()): boolean {
+  const ttl = Number.isFinite(ttlDays) ? Math.max(0, ttlDays) : 0
+  if (ttl === 0) return false
+  if (!Number.isFinite(updatedAt)) return false
+  return now - updatedAt > ttl * 24 * 60 * 60 * 1000
+}
+
 export interface SenderVerdict {
   ok: boolean
   reason: 'allowlisted' | 'roster' | 'thread-participant' | 'requester' | 'not-allowed'

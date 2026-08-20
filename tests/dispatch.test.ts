@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { dispatch } from '../src/dispatch.js'
+import { dispatch, expireDeadThreads } from '../src/dispatch.js'
 import * as envelope from '../src/envelope.js'
 import { BACKEND, EXPENSIVE, FRONTEND, REQUESTER, harness, scripted, tempRepo, type Harness } from './helpers.js'
 import type { MailEvent } from '../src/transport/types.js'
@@ -139,6 +139,8 @@ describe('§5.6-§5.8 task input, run and emit', () => {
     expect(reply.headers['x-hops']).toBe('1')
     expect(reply.text).toContain('Added the comment')
     expect(reply.attachments[0]!.filename).toBe(`patch-${result.taskId}.diff`)
+    // SPEC §3 names the terminal thread label.
+    expect([...(h.transport.threadLabels.get(reply.threadId) ?? [])]).toContain('state/replied')
     expect(Buffer.from(reply.attachments[0]!.content, 'base64').toString()).toContain(
       'explains the retry cap',
     )
@@ -207,6 +209,78 @@ describe('§5.6-§5.8 task input, run and emit', () => {
     const result = await dispatch(h, event)
     expect(h.store.getTask(result.taskId!)!.state).toBe('failed')
     expect(h.transport.sent.find((s) => s.kind === 'reply')!.text).toContain('Task failed')
+  })
+})
+
+describe('SPEC §4 participant cap', () => {
+  it('halts a thread that has become a CC storm, and notifies once', async () => {
+    h = harness({ budgets: { max_participants: 2 } })
+    h.runner = scripted([{ text: 'should not run' }])
+    const first = received({ subject: 'wide thread' })
+    // Three more people join the thread.
+    for (const who of ['a@yourco.dev', 'b@yourco.dev', 'c@yourco.dev']) {
+      h.transport.deliver({ inboxId: BACKEND, from: who, threadId: first.message.threadId, text: 'me too' })
+    }
+    const next = received({ threadId: first.message.threadId })
+
+    const result = await dispatch(h, next.event)
+    expect(result.disposition).toBe('participant-limit')
+    expect(h.transport.sent.filter((s) => s.subject.startsWith('Too many people')).length).toBe(1)
+
+    // A second message on the same thread does not re-notify.
+    const again = received({ threadId: first.message.threadId })
+    expect((await dispatch(h, again.event)).disposition).toBe('participant-limit')
+    expect(h.transport.sent.filter((s) => s.subject.startsWith('Too many people')).length).toBe(1)
+  })
+})
+
+describe('SPEC §4 dead-thread TTL', () => {
+  it('closes an abandoned parked task, releases its questions, and notifies', async () => {
+    h.runner = scripted([{ text: 'done' }])
+    const { event } = received()
+    const result = await dispatch(h, event)
+    const taskId = result.taskId!
+
+    // Park it, then wind the clock past the TTL.
+    h.store.updateTask(taskId, { state: 'awaiting-human' })
+    h.store.createQuestion({
+      question_id: 'q_aaaaaaaaaa',
+      task_id: taskId,
+      asked_email: 'ada@yourco.dev',
+      state: 'sent',
+      question: 'why?',
+    })
+    const later = Date.now() + 15 * 24 * 3600 * 1000
+
+    const expired = await expireDeadThreads(h, later)
+    expect(expired).toEqual([taskId])
+    expect(h.store.getTask(taskId)!.state).toBe('failed')
+    expect(h.store.getQuestion('q_aaaaaaaaaa')!.state).toBe('skipped')
+    const notice = h.transport.sent.find((s) => s.subject.includes('no activity'))!
+    expect(notice.text).toContain('ada@yourco.dev')
+
+    // Idempotent: a second sweep neither re-expires nor re-notifies.
+    expect(await expireDeadThreads(h, later)).toEqual([])
+    expect(h.transport.sent.filter((s) => s.subject.includes('no activity')).length).toBe(1)
+  })
+
+  it('leaves a live task alone', async () => {
+    h.runner = scripted([{ text: 'done' }])
+    const result = await dispatch(h, received().event)
+    h.store.updateTask(result.taskId!, { state: 'awaiting-human' })
+    expect(await expireDeadThreads(h, Date.now())).toEqual([])
+  })
+
+  it('starts a fresh task rather than resuming a stale one', async () => {
+    h.runner = scripted([{ text: 'done' }])
+    const first = received()
+    const a = await dispatch(h, first.event)
+    // Backdate the task past the TTL.
+    h.store.updateTask(a.taskId!, {}, Date.now() - 15 * 24 * 3600 * 1000)
+
+    const second = received({ threadId: first.message.threadId, text: 'picking this back up' })
+    const b = await dispatch(h, second.event)
+    expect(b.taskId).not.toBe(a.taskId)
   })
 })
 

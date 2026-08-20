@@ -18,6 +18,12 @@ export const PROTO_VERSION = '1'
 
 export const HEADER = {
   proto: 'x-harness-proto',
+  /**
+   * SPEC §3 names this header `x-agent-protocol` where IMPLEMENTATION.md §3
+   * names it `x-harness-proto`. We emit the latter and accept either on parse,
+   * so mail from a peer built against either document routes correctly.
+   */
+  protoAlias: 'x-agent-protocol',
   taskId: 'x-task-id',
   hops: 'x-hops',
   inReplyToQuestion: 'x-in-reply-to-question',
@@ -133,7 +139,10 @@ export function parse(headers?: Record<string, string>, text?: string): Envelope
   const h = lowerKeys(headers)
   const t = findTrailer(text)
 
-  const protoRaw = h[HEADER.proto] ?? (typeof t?.proto === 'string' ? t.proto : undefined)
+  const protoRaw =
+    h[HEADER.proto] ??
+    h[HEADER.protoAlias] ??
+    (typeof t?.proto === 'string' ? t.proto : undefined)
   const proto = protoRaw?.trim() || undefined
 
   const taskRaw =

@@ -23,11 +23,19 @@ budgets:
   max_hops: 6                   # agent-to-agent chain length before the loop guard fires
   questions_per_person_week: 3  # per-person outreach budget
   max_concurrent: 3             # sessions in flight; threads stay serial regardless
+  max_participants: 10          # a wider thread is a CC storm, not a task
+  dead_thread_ttl_days: 14      # a task untouched this long is closed out, not left parked
 
 # How outbound mail carries the envelope (§3). `headers` is right unless
 # `harness doctor` tells you your receive path strips them — then use
 # `trailer`, or `both` while you migrate.
 envelope: headers
+
+# The patch attachment is always the deliverable. When `gh` is on PATH and
+# authenticated, the harness also pushes the task branch and opens a PR, and
+# puts the link in the reply. Set to `never` for repos an agent should not push
+# branches to.
+pr: auto
 
 agents:
   - name: backend

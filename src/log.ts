@@ -23,8 +23,13 @@ function emit(level: Level, scope: string, msg: string, fields?: Record<string, 
     )
   }
   const line = parts.join(' ')
-  if (level === 'error' || level === 'warn') process.stderr.write(line + '\n')
-  else process.stdout.write(line + '\n')
+  // Everything goes to stderr when stdout is a protocol channel (the MCP
+  // server): one stray log line would corrupt the JSON-RPC stream.
+  if (level === 'error' || level === 'warn' || process.env.HARNESS_LOG_STDERR === '1') {
+    process.stderr.write(line + '\n')
+  } else {
+    process.stdout.write(line + '\n')
+  }
 }
 
 export interface Logger {

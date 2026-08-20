@@ -79,6 +79,8 @@ describe('budgetsFor (§6.4)', () => {
       maxHops: 6,
       questionsPerPersonWeek: 3,
       maxConcurrent: 3,
+      maxParticipants: 10,
+      deadThreadTtlDays: 14,
     })
   })
 

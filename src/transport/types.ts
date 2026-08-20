@@ -145,7 +145,9 @@ export const LABEL = {
   held: 'state/held',
   running: 'state/running',
   awaitingHuman: 'state/awaiting-human',
-  done: 'state/done',
+  // SPEC §3 names this one; it describes what happened on the thread rather
+  // than the internal task state, which is the right thing for a mail client.
+  replied: 'state/replied',
   failed: 'state/failed',
 } as const
 

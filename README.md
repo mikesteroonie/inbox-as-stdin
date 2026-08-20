@@ -24,8 +24,9 @@ The inbox is stdin. The thread is the conversation. The patch is the contract.
 ```
 
 - **Email in, patch out.** Every task produces a unified diff as an attachment plus a short
-  summary in the reply body. A PR is an optional courtesy when `gh` is available; the patch is
-  the contract.
+  summary in the reply body. When `gh` is on PATH and authenticated the harness also pushes the
+  task branch, opens a PR, and puts the link in the reply — but the patch is the contract and the
+  PR is a courtesy, so a PR that cannot be opened never costs you the deliverable.
 - **One worktree per task.** `.harness/wt/<task_id>`, cut from the agent's repo. Tasks never
   collide, and a second email on the thread resumes the same session in the same checkout.
 - **Default-deny outreach.** Agents may mail each other freely. Mailing a human is gated: an
@@ -34,7 +35,8 @@ The inbox is stdin. The thread is the conversation. The patch is the contract.
   `DECISIONS.md`, which ships inside the patch. Ask the same question twice and the second one is
   served from cache with no email sent.
 - **Guards before features.** Hop caps, per-task spend budgets, per-person weekly outreach
-  budgets, dedupe, and an armor gate all sit in front of the first prompt.
+  budgets, a per-thread participant cap, a dead-thread TTL, dedupe, and an armor gate all sit in
+  front of the first prompt.
 
 ## Quick start
 
@@ -57,6 +59,11 @@ npx harness tail thr_abc123         # one thread as a conversation
 ```
 
 `harness up --once` processes the backlog and exits — that is the CI mode.
+
+To hand work to a pod agent from a Claude Code session without running the daemon, point an MCP
+client at `harness mcp --agent backend`. It exposes `send_email_to_agent` under the same roster and
+tier checks the daemon enforces, so a human-driven session cannot mail anyone the daemon would
+refuse.
 
 ## Configuration
 
@@ -97,7 +104,8 @@ The system prompt states them and the code enforces them:
 
 ```
 src/
-  cli.ts              init | up | send | tail | doctor
+  cli.ts              init | up | send | tail | doctor | mcp
+  mcp.ts              standalone MCP server for send_email_to_agent (SPEC §6)
   daemon.ts           connect, subscribe, reconnect (backoff+jitter), backlog replay, scheduling
   dispatch.ts         the per-event pipeline — pure logic over injected I/O
   config.ts           harness.yaml schema; every error names its yaml path
@@ -107,14 +115,14 @@ src/
   reply.ts            extractReply + the untrusted-content fence
   store.ts            SQLite journal, typed accessors, transactions
   transport/          MailTransport interface, the AgentMail implementation, an in-memory fake
-  harness/            session, worktree, blame, outreach, answers, tools, prompts/*.md
+  harness/            session, worktree, blame, outreach, answers, tools, pr, prompts/*.md
 tests/                vitest; policy.ts and envelope.ts held at 100% branch coverage
 ```
 
 ## Development
 
 ```bash
-npm test              # 271 tests
+npm test              # 298 tests
 npm run test:watch
 npm run typecheck
 npm run build
@@ -126,12 +134,16 @@ the full permission/answer/bounce flow, the A↔B hop cap — are executable rat
 
 ## Design notes
 
-[`IMPLEMENTATION.md`](IMPLEMENTATION.md) is the construction spec this repository was built from:
-interfaces, schemas, formats and per-milestone acceptance criteria. It references a `SPEC.md` that
-records the design decisions; that document is not in this repository, so where the two would
-conflict, `IMPLEMENTATION.md` governs here.
+[`SPEC.md`](SPEC.md) records the design decisions; [`IMPLEMENTATION.md`](IMPLEMENTATION.md) is the
+construction spec built from it — interfaces, schemas, formats, per-milestone acceptance criteria.
+Where they conflict, SPEC.md wins.
 
-Two decisions worth knowing about, both recorded at their call sites:
+They conflict in two places, both naming, both reconciled here rather than adjudicated: SPEC calls
+the protocol header `x-agent-protocol` where IMPLEMENTATION calls it `x-harness-proto` (we emit the
+latter and **accept either** on parse), and SPEC names the terminal thread label `state/replied`
+where IMPLEMENTATION's pipeline said `done` (we use SPEC's).
+
+Three decisions worth knowing about, all recorded at their call sites:
 
 - **The daemon owns reconnection.** The AgentMail SDK ships a reconnecting socket, and we turn it
   off. Reconnect has to be coordinated with the cursor table so the backlog is replayed; a

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   checkBudget,
   checkHops,
+  checkParticipants,
+  isDeadThread,
   checkOutreachBudget,
   checkSender,
   classifyRecipient,
@@ -208,6 +210,47 @@ describe('weekKey', () => {
   it('accepts a number and defaults to now', () => {
     expect(weekKey(Date.parse('2026-08-20T00:00:00Z'))).toBe('2026-W34')
     expect(weekKey()).toMatch(/^\d{4}-W\d{2}$/)
+  })
+})
+
+describe('checkParticipants (SPEC §4)', () => {
+  it('passes at or under the cap', () => {
+    expect(checkParticipants(10, 10)).toEqual({ ok: true, count: 10, cap: 10 })
+    expect(checkParticipants(3, 10).ok).toBe(true)
+  })
+  it('fails past the cap', () => {
+    expect(checkParticipants(11, 10).ok).toBe(false)
+  })
+  it('normalizes junk', () => {
+    expect(checkParticipants(Number.NaN, 10).count).toBe(0)
+    expect(checkParticipants(-2, 10).count).toBe(0)
+    expect(checkParticipants(2.9, 10).count).toBe(2)
+    expect(checkParticipants(0, Number.NaN)).toEqual({ ok: true, count: 0, cap: 0 })
+    expect(checkParticipants(0, -1).cap).toBe(0)
+  })
+})
+
+describe('isDeadThread (SPEC §4)', () => {
+  const now = Date.parse('2026-08-20T00:00:00Z')
+  const daysAgo = (n: number): number => now - n * 24 * 3600 * 1000
+
+  it('is false inside the TTL', () => {
+    expect(isDeadThread(daysAgo(13), 14, now)).toBe(false)
+    expect(isDeadThread(now, 14, now)).toBe(false)
+  })
+  it('is true past the TTL', () => {
+    expect(isDeadThread(daysAgo(15), 14, now)).toBe(true)
+  })
+  it('is exclusive at the boundary', () => {
+    expect(isDeadThread(daysAgo(14), 14, now)).toBe(false)
+  })
+  it('a zero TTL disables expiry rather than expiring everything', () => {
+    expect(isDeadThread(daysAgo(999), 0, now)).toBe(false)
+  })
+  it('normalizes junk', () => {
+    expect(isDeadThread(Number.NaN, 14, now)).toBe(false)
+    expect(isDeadThread(daysAgo(999), Number.NaN, now)).toBe(false)
+    expect(isDeadThread(daysAgo(999), -1, now)).toBe(false)
   })
 })
 

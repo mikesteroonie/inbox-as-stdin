@@ -15,7 +15,7 @@
 
 import type { HarnessConfig } from './config.js'
 import { budgetsFor } from './config.js'
-import { dispatch, inboxOf, type Deps, type DispatchResult } from './dispatch.js'
+import { dispatch, expireDeadThreads, inboxOf, type Deps, type DispatchResult } from './dispatch.js'
 import { logger } from './log.js'
 import type { MailEvent, MailTransport, Subscription } from './transport/types.js'
 
@@ -124,10 +124,21 @@ export class Daemon {
 
   /** Run the backlog once and exit — `harness up --once`. */
   async runOnce(): Promise<DispatchResult[]> {
+    await this.sweep()
     const results = await this.replayBacklog()
     await this.queue.drain()
     this.opts.store.pruneSeen()
     return results
+  }
+
+  /** Housekeeping that runs on every (re)connect and on `--once` (SPEC §4). */
+  private async sweep(): Promise<void> {
+    try {
+      const expired = await expireDeadThreads(this.opts)
+      if (expired.length > 0) log.info('expired dead threads', { tasks: expired.length })
+    } catch (err) {
+      log.error('dead-thread sweep failed', { err: String(err) })
+    }
   }
 
   /** Run until `stop()`. Resolves when stopped. */
@@ -136,6 +147,7 @@ export class Daemon {
       try {
         await this.connect()
         this.attempt = 0
+        await this.sweep()
         await this.replayBacklog()
         await this.waitForDisconnect()
       } catch (err) {

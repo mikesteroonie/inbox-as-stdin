@@ -13,6 +13,10 @@ const Budgets = z
     max_hops: z.number().int().positive().optional(),
     questions_per_person_week: z.number().int().nonnegative().optional(),
     max_concurrent: z.number().int().positive().optional(),
+    /** SPEC §4 — participant cap per thread. */
+    max_participants: z.number().int().positive().optional(),
+    /** SPEC §4 — dead-thread TTL, in days. */
+    dead_thread_ttl_days: z.number().int().positive().optional(),
   })
   .strict()
 
@@ -49,6 +53,12 @@ export const HarnessConfigSchema = z
     budgets: Budgets.default({}),
     /** How outbound mail carries the envelope (§3 / Q1). */
     envelope: z.enum(['headers', 'trailer', 'both']).default('headers'),
+    /**
+     * SPEC §4.6 / IMPLEMENTATION §11 — the patch always ships; a PR is a
+     * courtesy opened when `gh` is available. `never` turns that off for
+     * repos where an agent should not be pushing branches.
+     */
+    pr: z.enum(['auto', 'never']).default('auto'),
     agents: z.array(Agent).min(1),
   })
   .strict()
@@ -76,6 +86,14 @@ export const DEFAULTS = {
   maxHops: 6,
   questionsPerPersonWeek: 3,
   maxConcurrent: 3,
+  /**
+   * SPEC §4 names these two guards but not their numbers. Ten participants is
+   * a large but plausible thread; past that it is a CC storm, not a task.
+   * Fourteen days is longer than a holiday, which is the usual reason a parked
+   * question goes unanswered.
+   */
+  maxParticipants: 10,
+  deadThreadTtlDays: 14,
 } as const
 
 export interface ResolvedBudgets {
@@ -83,6 +101,8 @@ export interface ResolvedBudgets {
   maxHops: number
   questionsPerPersonWeek: number
   maxConcurrent: number
+  maxParticipants: number
+  deadThreadTtlDays: number
 }
 
 /** Per-agent budgets override the pod defaults, field by field (§6.4). */
@@ -95,6 +115,9 @@ export function budgetsFor(cfg: HarnessConfig, agent?: AgentConfig): ResolvedBud
     questionsPerPersonWeek:
       own.questions_per_person_week ?? pod.questions_per_person_week ?? DEFAULTS.questionsPerPersonWeek,
     maxConcurrent: own.max_concurrent ?? pod.max_concurrent ?? DEFAULTS.maxConcurrent,
+    maxParticipants: own.max_participants ?? pod.max_participants ?? DEFAULTS.maxParticipants,
+    deadThreadTtlDays:
+      own.dead_thread_ttl_days ?? pod.dead_thread_ttl_days ?? DEFAULTS.deadThreadTtlDays,
   }
 }
 

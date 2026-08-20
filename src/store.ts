@@ -162,6 +162,19 @@ export class Store {
       .get(threadId) as TaskRow | undefined
   }
 
+  /**
+   * Live tasks nobody has touched since `before` — SPEC §4's dead-thread TTL.
+   * Only running/awaiting-human tasks can go stale; finished ones are done.
+   */
+  listStaleTasks(before: number): TaskRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM tasks WHERE state IN ('running','awaiting-human') AND updated_at < ?
+         ORDER BY updated_at ASC`,
+      )
+      .all(before) as TaskRow[]
+  }
+
   listTasks(state?: TaskState): TaskRow[] {
     return (
       state === undefined
