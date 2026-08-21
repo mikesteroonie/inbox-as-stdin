@@ -126,12 +126,17 @@ byproduct so Claude Code users can join a swarm without running the daemon.
 
 ## 7. Open questions
 
-- **Q1 — envelope headers.** Do custom `headers` survive the full SES round-trip inbox→inbox
-  today (send path accepts them; verify receive path preserves them)? If not, fall back to a
-  structured trailer block in the body. Needs a 30-minute spike against staging.
-- **Q2 — per-inbox API keys** (`POST /inboxes/{inbox_id}/api-keys`): confirm permission scoping
-  is sufficient for the one-key-per-agent blast-radius story.
+- **Q1 — envelope headers. RESOLVED: yes.** Custom `headers` survive the full round-trip
+  inbox→inbox. Verified against production by `harness doctor`, which sends a probe between two
+  roster inboxes and reads the envelope back off the recipient with the recipient's own key:
+  `x-harness-proto`, `x-task-id` and `x-hops` all arrived intact, in 4s. `envelope: headers` is
+  therefore the default. The structured trailer block was built anyway and stays behind the same
+  `envelope.ts` API as `envelope: trailer`, in case a future receive path is less generous.
+- **Q2 — per-inbox API keys. RESOLVED: yes.** `harness init` mints one key per inbox and
+  `doctor` confirms each key reaches its own inbox. The one-key-per-agent blast-radius story
+  holds: a compromised agent reads only its own mail.
 - **Q3 — answer-cache format.** Committed `DECISIONS.md` vs. structured sidecar
   (`.harness/answers.jsonl`). Leaning jsonl + rendered markdown.
 - **Q4 — dogfood target.** First real repo the harness runs against, and which internal humans
-  opt into the blame allowlist.
+  opt into the blame allowlist. `harness.solo.yaml` is the shape: `allowlist.emails` naming one
+  person, `allowlist.domains` empty, so exactly one human is reachable by construction.

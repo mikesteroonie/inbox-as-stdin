@@ -146,11 +146,13 @@ the full permission/answer/bounce flow, the A↔B hop cap — are executable rat
   webhook as the deployed alternative; `dispatch()` takes an event and its dependencies with no
   daemon involved, so a webhook handler is a thin adapter rather than a rewrite — but it is not
   written yet.
-- **The AgentMail transport has not run against a live account.** It is written against the real
-  SDK's types and typechecks clean, but `harness doctor` is what proves a deployment — including
-  the SPEC §7 Q1 header round-trip and the Q2 per-inbox key scoping. Everything downstream of the
-  transport — the pipeline, a real Agent SDK session, the worktree, the patch, cost accounting —
-  has been run end to end against a live model with mail stubbed out.
+- **The full loop has not been run end to end.** Both halves have been, separately: the transport
+  against a live AgentMail account (inboxes, per-inbox keys, websocket subscribe, and a header
+  round-trip between two inboxes — SPEC §7 Q1 and Q2, both resolved), and the pipeline against a
+  live Agent SDK session producing a real patch with real cost accounting. What has not yet run is
+  a task arriving by real mail and leaving as a real reply, with those two halves joined.
+- **Untested against real traffic:** the blame-outreach flow (permission gate, park, resume), the
+  `gh` PR path, and bounce handling. Each is covered by tests against fakes.
 
 ## Design notes
 
