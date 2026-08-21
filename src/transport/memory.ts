@@ -46,6 +46,8 @@ export class MemoryTransport implements MailTransport {
   private closeHooks: ((info: { code?: number; reason?: string }) => void)[] = []
   /** Set while "disconnected", to model a network outage (§10 milestone 1). */
   private online = true
+  /** Set to model a server that accepts the socket then refuses the scope. */
+  private subscribeError: string | undefined
 
   async ensureInbox(username: string, displayName: string): Promise<{ inboxId: string; email: string }> {
     const email = username.includes('@') ? username : `${username}@memory.test`
@@ -58,6 +60,9 @@ export class MemoryTransport implements MailTransport {
     onEvent: (e: MailEvent) => void,
     hooks?: { onClose?: (info: { code?: number; reason?: string }) => void },
   ): Promise<Subscription> {
+    // An open socket is not a subscribed one: the real transport rejects here
+    // when the server refuses the scope, and callers must see that.
+    if (this.subscribeError !== undefined) throw new Error(this.subscribeError)
     this.listeners.push(onEvent)
     if (hooks?.onClose) this.closeHooks.push(hooks.onClose)
     return {
@@ -194,5 +199,14 @@ export class MemoryTransport implements MailTransport {
 
   goOnline(): void {
     this.online = true
+  }
+
+  /** Model the server refusing the subscription scope. */
+  refuseSubscribe(reason = 'An inbox-scoped connection cannot subscribe to pods.'): void {
+    this.subscribeError = reason
+  }
+
+  allowSubscribe(): void {
+    this.subscribeError = undefined
   }
 }

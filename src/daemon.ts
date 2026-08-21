@@ -218,11 +218,10 @@ export class Daemon {
     for (const [agentName, transport] of this.opts.transports) {
       const agent = this.opts.cfg.agents.find((a) => a.name === agentName)
       if (!agent) continue
+      // Scope by inbox, not pod. Each agent connects with its own inbox-scoped
+      // key (SPEC §3), and such a key is refused a pod subscription outright.
       const sub = await transport.listen(
-        {
-          ...(this.opts.cfg.pod_id ? { podId: this.opts.cfg.pod_id } : {}),
-          inboxIds: [inboxOf(agent)],
-        },
+        { inboxIds: [inboxOf(agent)] },
         (event) => this.enqueue(event),
         {
           onClose: (info) => {
@@ -233,6 +232,8 @@ export class Daemon {
         },
       )
       this.subscriptions.push(sub)
+      // Logged only after the server confirms: an open socket is not a
+      // subscribed one, and claiming otherwise hides a dead wake-up path.
       log.info('listening', { agent: agentName, inbox: inboxOf(agent) })
     }
   }
