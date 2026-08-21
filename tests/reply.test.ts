@@ -39,12 +39,12 @@ describe('extractReply edge cases', () => {
   })
 
   it('cuts at a wrapped Gmail attribution', () => {
-    const body = 'sure\n\nOn Mon, Aug 17, 2026 at 9:04 AM Someone With A Very Long Name\n<x@y.dev> wrote:\n\n> hi'
+    const body = 'sure\n\nOn Mon, Aug 17, 2026 at 9:04 AM Someone With A Very Long Name\n<x@example.net> wrote:\n\n> hi'
     expect(extractReply(body)).toBe('sure')
   })
 
   it('cuts at a non-English attribution', () => {
-    expect(extractReply('claro\n\nEl 17 ago 2026, a las 9:04, X <x@y.dev> escribió:\n\n> hola')).toBe('claro')
+    expect(extractReply('claro\n\nEl 17 ago 2026, a las 9:04, X <x@example.net> escribió:\n\n> hola')).toBe('claro')
   })
 
   it('does not cut on a bare "On" line that never says wrote', () => {

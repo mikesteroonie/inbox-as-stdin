@@ -12,11 +12,11 @@ pod: swarm-demo
 allowlist:
   # Tier-ask eligible: the harness may ask permission to email these domains.
   # Everything not here and not in the roster is tier-never (§6.1).
-  # A domain covers its subdomains: yourco.dev matches mail.yourco.dev.
-  domains: [yourco.dev]
+  # A domain covers its subdomains: example.com matches mail.example.com.
+  domains: [example.com]
 
 # Default CC on outreach, and the address the permission gate writes to.
-requester: michael@yourco.dev
+requester: owner@example.com
 
 budgets:
   usd: 5                        # per task

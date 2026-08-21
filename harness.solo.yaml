@@ -1,8 +1,11 @@
-# Dogfood config (SPEC §7 Q4): the harness pointed at its own repository, with
-# exactly one human reachable. Copy to `harness.yaml`, fill in the inbox
-# addresses `harness init` gives you, and put the keys in `.env`.
+# The narrowest useful config: the harness pointed at one repository, with
+# exactly one human reachable. A good shape for a first run on a real codebase.
 #
-#     cp harness.dogfood.yaml harness.yaml
+# Replace `you@example.com` with your own address and fill in the inbox address
+# `harness init` prints. Keys go in `.env`, never here.
+#
+#     cp harness.solo.yaml harness.yaml
+#     $EDITOR harness.yaml     # set requester, allowlist.emails, agents[].inbox
 #     harness doctor
 #     harness up
 #
@@ -11,16 +14,16 @@
 # tier-never. The first blame-outreach email this pod sends can only go to the
 # address below.
 
-pod: inbox-as-stdin
+pod: solo
 
 allowlist:
   # Deliberately empty. A domain entry here would make every address at that
   # domain tier-ask; the point of this config is that exactly one human is
   # reachable.
   domains: []
-  emails: [michael@agentmail.cc]
+  emails: [you@example.com]
 
-requester: michael@agentmail.cc
+requester: you@example.com
 
 budgets:
   usd: 5

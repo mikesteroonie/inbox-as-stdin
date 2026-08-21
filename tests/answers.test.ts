@@ -16,8 +16,8 @@ const record = (over: Partial<AnswerRecord> = {}): AnswerRecord => ({
   line_start: 40,
   line_end: 44,
   sha: 'abc12345def',
-  asked: 'ada@yourco.dev',
-  answered_by: 'ada@yourco.dev',
+  asked: 'ada@example.com',
+  answered_by: 'ada@example.com',
   question: 'Why is the retry capped at 3?',
   answer: 'Upstream rate-limits at 5/min and we share the budget.',
   at: Date.parse('2026-08-17T09:30:00Z'),
@@ -101,8 +101,8 @@ describe('renderDecisions', () => {
   it('groups by file with the range, author, date and sha', () => {
     const md = renderDecisions([record(), record({ file: 'src/a.ts', line_start: 1, line_end: 1 })])
     expect(md).toContain('## `src/a.ts`')
-    expect(md).toContain('### L40-L44 — ada@yourco.dev (2026-08-17, `abc12345`)')
-    expect(md).toContain('### L1 — ada@yourco.dev')
+    expect(md).toContain('### L40-L44 — ada@example.com (2026-08-17, `abc12345`)')
+    expect(md).toContain('### L1 — ada@example.com')
     expect(md).toContain('**Q:** Why is the retry capped at 3?')
   })
 })

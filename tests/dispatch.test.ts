@@ -77,7 +77,7 @@ describe('§5.5 loop guards', () => {
   })
 
   it('drops a sender who is neither allowlisted, roster, nor on an active thread', async () => {
-    const { event } = received({ from: 'stranger@example.com' })
+    const { event } = received({ from: 'stranger@example.org' })
     expect((await dispatch(h, event)).disposition).toBe('sender-refused')
     expect(h.transport.sent.length).toBe(0)
   })
@@ -91,11 +91,11 @@ describe('§5.5 loop guards', () => {
     // The stranger is now on the thread because the reply CC'd them in.
     h.transport.deliver({
       inboxId: BACKEND,
-      from: 'stranger@example.com',
+      from: 'stranger@example.org',
       threadId: first.message.threadId,
       text: 'seed',
     })
-    const follow = received({ from: 'stranger@example.com', threadId: first.message.threadId })
+    const follow = received({ from: 'stranger@example.org', threadId: first.message.threadId })
     expect((await dispatch(h, follow.event)).disposition).toBe('task-input')
   })
 
@@ -218,7 +218,7 @@ describe('SPEC §4 participant cap', () => {
     h.runner = scripted([{ text: 'should not run' }])
     const first = received({ subject: 'wide thread' })
     // Three more people join the thread.
-    for (const who of ['a@yourco.dev', 'b@yourco.dev', 'c@yourco.dev']) {
+    for (const who of ['a@example.com', 'b@example.com', 'c@example.com']) {
       h.transport.deliver({ inboxId: BACKEND, from: who, threadId: first.message.threadId, text: 'me too' })
     }
     const next = received({ threadId: first.message.threadId })
@@ -246,7 +246,7 @@ describe('SPEC §4 dead-thread TTL', () => {
     h.store.createQuestion({
       question_id: 'q_aaaaaaaaaa',
       task_id: taskId,
-      asked_email: 'ada@yourco.dev',
+      asked_email: 'ada@example.com',
       state: 'sent',
       question: 'why?',
     })
@@ -257,7 +257,7 @@ describe('SPEC §4 dead-thread TTL', () => {
     expect(h.store.getTask(taskId)!.state).toBe('failed')
     expect(h.store.getQuestion('q_aaaaaaaaaa')!.state).toBe('skipped')
     const notice = h.transport.sent.find((s) => s.subject.includes('no activity'))!
-    expect(notice.text).toContain('ada@yourco.dev')
+    expect(notice.text).toContain('ada@example.com')
 
     // Idempotent: a second sweep neither re-expires nor re-notifies.
     expect(await expireDeadThreads(h, later)).toEqual([])
@@ -296,7 +296,7 @@ describe('§5 bounce handling', () => {
       inboxId: BACKEND,
       messageId: 'm-x',
       threadId: message.threadId,
-      recipients: ['ghost@nowhere.dev'],
+      recipients: ['ghost@nowhere.invalid'],
       reason: 'Permanent/General',
       at: Date.now(),
     }
@@ -335,7 +335,7 @@ describe('§10 milestone 4 — two agents', () => {
         text: 'Refused.',
         call: async (ports) => {
           refusal = await ports.sendEmailToAgent({
-            to: 'stranger@example.com',
+            to: 'stranger@example.org',
             subject: 'hi',
             body: 'hi',
           })
@@ -344,7 +344,7 @@ describe('§10 milestone 4 — two agents', () => {
     ])
     await dispatch(h, received().event)
     expect(refusal).toMatchObject({ kind: 'refused' })
-    expect(h.transport.sent.some((s) => s.to.includes('stranger@example.com'))).toBe(false)
+    expect(h.transport.sent.some((s) => s.to.includes('stranger@example.org'))).toBe(false)
   })
 
   it('refuses a send to a person and points at ask_code_author instead', async () => {
@@ -354,7 +354,7 @@ describe('§10 milestone 4 — two agents', () => {
         text: 'Refused.',
         call: async (ports) => {
           refusal = (await ports.sendEmailToAgent({
-            to: 'ada@yourco.dev',
+            to: 'ada@example.com',
             subject: 'hi',
             body: 'hi',
           })) as { kind: string; reason?: string }

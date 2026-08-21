@@ -15,7 +15,7 @@ import type { HarnessPorts } from '../src/harness/tools.js'
 import { Store } from '../src/store.js'
 import { MemoryTransport } from '../src/transport/memory.js'
 
-export const REQUESTER = 'michael@yourco.dev'
+export const REQUESTER = 'owner@example.com'
 export const BACKEND = 'backend@memory.test'
 export const FRONTEND = 'frontend@memory.test'
 
@@ -25,7 +25,7 @@ export function tempRepo(files: Record<string, string> = { 'retry.ts': 'one\ntwo
     execFileSync('git', args, { cwd: repo, stdio: 'pipe' })
   }
   git('init', '-q', '-b', 'main', '.')
-  git('config', 'user.email', 'ada@yourco.dev')
+  git('config', 'user.email', 'ada@example.com')
   git('config', 'user.name', 'Ada Lovelace')
   for (const [name, body] of Object.entries(files)) writeFileSync(join(repo, name), body)
   git('add', '-A')
@@ -37,7 +37,7 @@ export function config(over: Partial<HarnessConfig> = {}, repo = '.'): HarnessCo
   return validateConfig({
     pod: 'test',
     requester: REQUESTER,
-    allowlist: { domains: ['yourco.dev'] },
+    allowlist: { domains: ['example.com'] },
     budgets: { usd: 5, max_hops: 6, questions_per_person_week: 3, max_concurrent: 3 },
     agents: [
       { name: 'backend', inbox: BACKEND, display_name: 'Backend Agent', repo },

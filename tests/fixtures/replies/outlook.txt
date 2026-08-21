@@ -4,7 +4,7 @@ budget with the ingest job.
 -----Original Message-----
 From: Backend Agent <backend@agentmail.to>
 Sent: Monday, August 17, 2026 9:04 AM
-To: Ada Lovelace <ada@yourco.dev>
+To: Ada Lovelace <ada@example.com>
 Subject: Quick question about retry.ts:41
 
 Why is the retry capped at 3 here?

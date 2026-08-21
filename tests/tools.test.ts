@@ -37,7 +37,7 @@ describe('send_email_to_agent', () => {
         },
       }),
     )
-    await sendEmailToAgent.handler({ to: 'a@b.dev', subject: 's', body: 'b', thread_id: 'thr_9' }, {})
+    await sendEmailToAgent.handler({ to: 'a@example.org', subject: 's', body: 'b', thread_id: 'thr_9' }, {})
     expect(seen).toMatchObject({ threadId: 'thr_9' })
   })
 
@@ -45,7 +45,7 @@ describe('send_email_to_agent', () => {
     const { sendEmailToAgent } = harnessToolDefinitions(
       ports({ sendEmailToAgent: async () => ({ kind: 'refused', reason: 'not in the roster' }) }),
     )
-    const out = await sendEmailToAgent.handler({ to: 'x@y.dev', subject: 's', body: 'b' }, {})
+    const out = await sendEmailToAgent.handler({ to: 'x@example.net', subject: 's', body: 'b' }, {})
     expect(out.isError).toBe(true)
     expect(textOf(out as never)).toContain('Do not try another route')
   })
