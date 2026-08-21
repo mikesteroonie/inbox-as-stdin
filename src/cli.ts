@@ -9,7 +9,7 @@ import { input, select } from '@inquirer/prompts'
 import { Command } from 'commander'
 import { stringify as toYaml } from 'yaml'
 import { apiKeyEnvName, apiKeyFor, budgetsFor, loadConfig, ConfigError, type HarnessConfig } from './config.js'
-import { clientId } from './ids.js'
+import { clientId, mintTaskId } from './ids.js'
 import { Daemon } from './daemon.js'
 import { agentForInbox, inboxOf } from './dispatch.js'
 import * as envelope from './envelope.js'
@@ -531,6 +531,7 @@ program
   .description('check keys, inboxes, websocket, pricing, and the §3 envelope round-trip')
   .option('-c, --config <path>', 'config path', 'harness.yaml')
   .option('--skip-roundtrip', 'skip the probe email (no mail is sent)')
+  .option('--probe-timeout <seconds>', 'how long to wait for the probe to arrive', '120')
   .action(async (opts) => {
     let failures = 0
     const check = async (name: string, fn: () => Promise<string>): Promise<void> => {
@@ -598,7 +599,8 @@ program
     if (!opts.skipRoundtrip) {
       // Q1 (§3): does the receive path preserve custom headers end-to-end?
       // This is that test, automated.
-      await check('envelope round-trip (Q1)', async () => roundTrip(cfg))
+      const probeTimeout = Math.max(10, Number(opts.probeTimeout) || 120) * 1000
+      await check('envelope round-trip (Q1)', async () => roundTrip(cfg, probeTimeout))
     }
 
     console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`)
@@ -606,42 +608,72 @@ program
   })
 
 /**
- * Send a probe to our own inbox and read the headers back off it. Proves §3
- * works on this deployment — or tells you to switch `envelope: trailer`.
+ * SPEC §7 Q1: "Do custom `headers` survive the full SES round-trip inbox→inbox?"
+ *
+ * Inbox→inbox, which is the whole point: a message addressed to the inbox that
+ * sent it need not traverse the same delivery path, and may not come back at
+ * all, so a self-addressed probe can answer the question neither way. With two
+ * or more agents we send between two of them and read the headers off the
+ * recipient with the recipient's own key — the exact path real traffic takes.
  */
-async function roundTrip(cfg: HarnessConfig): Promise<string> {
-  const agent = cfg.agents[0]!
-  const transport = transportFor(cfg, agent.name)
-  const inbox = inboxOf(agent)
-  const probeTask = 'aaaaaaaa'
-  const { headers, text } = envelope.encode({ taskId: probeTask, hops: 1 }, 'harness doctor probe.', cfg.envelope)
+async function roundTrip(cfg: HarnessConfig, timeoutMs: number): Promise<string> {
+  const sender = cfg.agents[0]!
+  const recipient = cfg.agents[1] ?? sender
+  const selfAddressed = recipient === sender
 
-  const sent = await transport.send(inbox, {
-    to: [inbox],
-    subject: 'harness doctor: envelope probe',
-    text,
-    headers,
-  })
+  const senderTransport = transportFor(cfg, sender.name)
+  const recipientTransport = transportFor(cfg, recipient.name)
+  const from = inboxOf(sender)
+  const to = inboxOf(recipient)
 
-  const deadline = Date.now() + 60_000
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 2_000))
-    const refs = await transport.listSince(inbox, Date.now() - 300_000, 25)
+  // A unique token per run, so a probe from an earlier run cannot be mistaken
+  // for this one and report a stale verdict.
+  const token = mintTaskId()
+  const subject = `harness doctor probe ${token}`
+  const { headers, text } = envelope.encode(
+    { taskId: token, hops: 1 },
+    `Probe from \`harness doctor\`. If this landed in a human inbox, something is misrouted.`,
+    cfg.envelope,
+  )
+
+  const startedAt = Date.now()
+  await senderTransport.send(from, { to: [to], subject, text, headers })
+
+  let arrivals = 0
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 3_000))
+    const refs = await recipientTransport.listSince(to, startedAt - 60_000, 50)
+    arrivals = refs.length
     for (const ref of refs) {
-      if (ref.messageId === sent.messageId) continue
-      const message = await transport.getMessage(inbox, ref.messageId)
-      if (message.subject !== 'harness doctor: envelope probe') continue
+      const message = await recipientTransport.getMessage(to, ref.messageId)
+      if (!message.subject?.includes(token)) continue
+
       const parsed = envelope.parse(message.headers, message.text)
-      if (parsed.taskId === probeTask && parsed.hops === 1 && !parsed.human) {
-        return `headers survived (${cfg.envelope} mode)`
+      if (parsed.taskId === token && parsed.hops === 1 && !parsed.human) {
+        const path = selfAddressed ? `${from} → itself` : `${from} → ${to}`
+        return `headers survived ${path} in ${Math.round((Date.now() - startedAt) / 1000)}s (${cfg.envelope} mode)`
       }
       throw new Error(
-        `probe arrived but the envelope did not survive (task=${parsed.taskId ?? 'lost'}, ` +
-          `hops=${parsed.hops}). Set \`envelope: trailer\` in ${'harness.yaml'} and re-run.`,
+        `the probe arrived at ${to} but its envelope did not survive ` +
+          `(task=${parsed.taskId ?? 'lost'}, hops=${parsed.hops}, ` +
+          `${parsed.human ? 'no proto marker' : 'proto present'}). This is SPEC Q1 answered ` +
+          `negatively: set \`envelope: trailer\` in harness.yaml and re-run — the fallback puts ` +
+          `the same fields in the message body.`,
       )
     }
   }
-  throw new Error('probe never arrived within 60s')
+
+  const waited = Math.round(timeoutMs / 1000)
+  throw new Error(
+    `no probe arrived at ${to} within ${waited}s ` +
+      `(${arrivals} message(s) in that inbox meanwhile). This does NOT answer Q1 — nothing came ` +
+      `back to inspect. Delivery may just be slower than ${waited}s on a new inbox: re-run with ` +
+      `\`--probe-timeout 300\`.` +
+      (selfAddressed
+        ? ` Note this pod has one agent, so the probe was self-addressed, which some delivery ` +
+          `paths drop; a second agent would make this a true inbox→inbox test.`
+        : ''),
+  )
 }
 
 /* -------------------------------------------------------------- helpers */
