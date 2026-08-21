@@ -13,7 +13,7 @@ const base = {
   messageId: 'msg_1',
   labels: [],
   timestamp: new Date('2026-08-17T09:00:00Z'),
-  from: 'Ada <ada@yourco.dev>',
+  from: 'Ada <ada@example.com>',
   to: ['backend@agentmail.to'],
   size: 100,
   updatedAt: new Date(),
@@ -116,12 +116,12 @@ describe('toMailEvent', () => {
           threadId: 't',
           type: 'Permanent',
           subType: 'NoSuchUser',
-          recipients: [{ address: 'ghost@nowhere.dev' }],
+          recipients: [{ address: 'ghost@nowhere.invalid' }],
         },
       }),
     ).toMatchObject({
       kind: 'message.bounced',
-      recipients: ['ghost@nowhere.dev'],
+      recipients: ['ghost@nowhere.invalid'],
       reason: 'Permanent/NoSuchUser',
     })
   })

@@ -14,8 +14,8 @@ import * as answers from '../src/harness/answers.js'
 import { BACKEND, REQUESTER, harness, scripted, type Harness } from './helpers.js'
 import type { MailEvent } from '../src/transport/types.js'
 
-const ADA = 'ada@yourco.dev'
-const BOB = 'bob@yourco.dev'
+const ADA = 'ada@example.com'
+const BOB = 'bob@example.com'
 
 /** A repo where Bob wrote the region and Ada wrote the file before him. */
 function twoAuthorRepo(): string {
@@ -208,7 +208,7 @@ describe('the answer path (§6.3, §8)', () => {
     }
 
     const answer = inbound({
-      from: 'Bob Barker <bob@yourco.dev>',
+      from: 'Bob Barker <bob@example.com>',
       text: 'It is deliberate — the upstream API rate-limits us at 5/min.\n\n> Why is the cap 3',
     })
     const result = await dispatch(h, answer.event)
@@ -279,7 +279,7 @@ describe('the cache (§8)', () => {
 
 describe('policy and budget refusals (§6.1, §6.3)', () => {
   it('refuses outreach to an author outside the allowlist', async () => {
-    h = harness({ allowlist: { domains: ['elsewhere.example'] } }, twoAuthorRepo())
+    h = harness({ allowlist: { domains: ['example.net'] } }, twoAuthorRepo())
     let refusal: { kind: string; reason?: string } | undefined
     h.runner = scripted([
       {

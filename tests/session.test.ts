@@ -20,8 +20,8 @@ import { scripted } from './helpers.js'
 async function optionsFor(tools?: string[]): Promise<Options> {
   const cfg = validateConfig({
     pod: 'p',
-    requester: 'michael@yourco.dev',
-    agents: [{ name: 'backend', inbox: 'backend@x.dev', ...(tools ? { tools } : {}) }],
+    requester: 'owner@example.com',
+    agents: [{ name: 'backend', inbox: 'backend@example.org', ...(tools ? { tools } : {}) }],
   })
   const agent = cfg.agents[0]!
   let captured: Options | undefined

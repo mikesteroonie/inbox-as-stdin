@@ -40,7 +40,7 @@ describe('sendToPodAgent', () => {
 
   it('refuses a person, even on an allowlisted domain', async () => {
     const d = deps()
-    const result = await sendToPodAgent(d, { to: 'ada@yourco.dev', subject: 's', body: 'b' })
+    const result = await sendToPodAgent(d, { to: 'ada@example.com', subject: 's', body: 'b' })
     expect(result.ok).toBe(false)
     expect(result.text).toContain('not an agent')
     expect(d.transport.sent.length).toBe(0)
@@ -48,7 +48,7 @@ describe('sendToPodAgent', () => {
 
   it('refuses an address outside the pod entirely', async () => {
     const d = deps()
-    expect((await sendToPodAgent(d, { to: 'stranger@example.com', subject: 's', body: 'b' })).ok).toBe(
+    expect((await sendToPodAgent(d, { to: 'stranger@example.org', subject: 's', body: 'b' })).ok).toBe(
       false,
     )
     expect(d.transport.sent.length).toBe(0)

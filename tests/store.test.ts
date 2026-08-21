@@ -94,7 +94,7 @@ describe('questions', () => {
     s.createQuestion({
       question_id: 'q_aaaaaaaaaa',
       task_id: 'aaaaaaaa',
-      asked_email: 'Ada@YourCo.dev',
+      asked_email: 'Ada@example.com',
       state: 'pending-permission',
       file: 'src/retry.ts',
       line_start: 40,
@@ -106,7 +106,7 @@ describe('questions', () => {
   it('normalizes the address and round-trips', () => {
     const s = store()
     seed(s)
-    expect(s.getQuestion('q_aaaaaaaaaa')!.asked_email).toBe('ada@yourco.dev')
+    expect(s.getQuestion('q_aaaaaaaaaa')!.asked_email).toBe('ada@example.com')
     s.close()
   })
 
@@ -116,7 +116,7 @@ describe('questions', () => {
     expect(s.findQuestionsByThread('thr1', 'pending-permission').length).toBe(1)
     expect(s.findQuestionsByThread('thr1', 'sent').length).toBe(0)
     s.updateQuestion('q_aaaaaaaaaa', { state: 'sent' })
-    expect(s.findSentQuestionFrom('ADA@yourco.dev')!.question_id).toBe('q_aaaaaaaaaa')
+    expect(s.findSentQuestionFrom('ADA@example.com')!.question_id).toBe('q_aaaaaaaaaa')
     s.close()
   })
 
@@ -140,11 +140,11 @@ describe('questions', () => {
 describe('outreach budget (§6.3)', () => {
   it('counts per person per week', () => {
     const s = store()
-    expect(s.outreachCount('ada@yourco.dev')).toBe(0)
-    expect(s.bumpOutreach('Ada@YourCo.dev')).toBe(1)
-    expect(s.bumpOutreach('ada@yourco.dev')).toBe(2)
-    expect(s.outreachCount('ADA@YOURCO.DEV')).toBe(2)
-    expect(s.outreachCount('ada@yourco.dev', '1999-W01')).toBe(0)
+    expect(s.outreachCount('ada@example.com')).toBe(0)
+    expect(s.bumpOutreach('Ada@example.com')).toBe(1)
+    expect(s.bumpOutreach('ada@example.com')).toBe(2)
+    expect(s.outreachCount('ADA@example.com')).toBe(2)
+    expect(s.outreachCount('ada@example.com', '1999-W01')).toBe(0)
     s.close()
   })
 })

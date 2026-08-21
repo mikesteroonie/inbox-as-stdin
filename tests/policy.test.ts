@@ -15,24 +15,24 @@ import {
 
 describe('normalizeAddress', () => {
   it.each([
-    ['ada@yourco.dev', 'ada@yourco.dev'],
-    ['  Ada Lovelace <Ada@YourCo.DEV> ', 'ada@yourco.dev'],
-    ['mailto:ada@yourco.dev', 'ada@yourco.dev'],
-    ['"ada@yourco.dev"', 'ada@yourco.dev'],
+    ['ada@example.com', 'ada@example.com'],
+    ['  Ada Lovelace <Ada@example.com> ', 'ada@example.com'],
+    ['mailto:ada@example.com', 'ada@example.com'],
+    ['"ada@example.com"', 'ada@example.com'],
   ])('normalizes %s', (raw, expected) => {
     expect(normalizeAddress(raw)).toBe(expected)
   })
 
   it.each([
     ['not-an-address'],
-    ['@yourco.dev'],
+    ['@example.com'],
     ['ada@'],
     ['ada@localhost'],
     ['ada@.dev'],
     ['ada@dev.'],
-    ['two addrs <a@x.dev>, <b@x.dev>'],
-    ['ada lovelace@yourco.dev'],
-    ['ada@yourco.dev;bob@yourco.dev'],
+    ['two addrs <a@example.org>, <b@example.org>'],
+    ['ada lovelace@example.com'],
+    ['ada@example.com;bob@example.com'],
     [''],
   ])('rejects %s', (raw) => {
     expect(normalizeAddress(raw)).toBeUndefined()
@@ -51,7 +51,7 @@ describe('normalizeAddress', () => {
 
 describe('domainOf', () => {
   it('returns the domain', () => {
-    expect(domainOf('Ada <ada@Mail.YourCo.dev>')).toBe('mail.yourco.dev')
+    expect(domainOf('Ada <ada@Mail.example.com>')).toBe('mail.example.com')
   })
   it('returns undefined for junk', () => {
     expect(domainOf('nope')).toBeUndefined()
@@ -60,39 +60,41 @@ describe('domainOf', () => {
 
 describe('domainAllowed', () => {
   it('matches exactly', () => {
-    expect(domainAllowed('a@yourco.dev', ['yourco.dev'])).toBe(true)
+    expect(domainAllowed('a@example.com', ['example.com'])).toBe(true)
   })
   it('matches subdomains', () => {
-    expect(domainAllowed('a@mail.yourco.dev', ['yourco.dev'])).toBe(true)
+    expect(domainAllowed('a@mail.example.com', ['example.com'])).toBe(true)
   })
   it('does not match a suffix that is not a subdomain', () => {
-    expect(domainAllowed('a@notyourco.dev', ['yourco.dev'])).toBe(false)
+    // Textually ends in "example.com" but is not a subdomain of it: this is
+    // what catches a naive endsWith() check.
+    expect(domainAllowed('a@notexample.com', ['example.com'])).toBe(false)
   })
   it('tolerates leading dots and @ in config', () => {
-    expect(domainAllowed('a@yourco.dev', ['@yourco.dev'])).toBe(true)
-    expect(domainAllowed('a@yourco.dev', ['.yourco.dev'])).toBe(true)
+    expect(domainAllowed('a@example.com', ['@example.com'])).toBe(true)
+    expect(domainAllowed('a@example.com', ['.example.com'])).toBe(true)
   })
   it('skips blank entries', () => {
-    expect(domainAllowed('a@yourco.dev', ['  ', 'yourco.dev'])).toBe(true)
-    expect(domainAllowed('a@yourco.dev', ['   '])).toBe(false)
+    expect(domainAllowed('a@example.com', ['  ', 'example.com'])).toBe(true)
+    expect(domainAllowed('a@example.com', ['   '])).toBe(false)
   })
   it('is false for an unparseable address', () => {
-    expect(domainAllowed('junk', ['yourco.dev'])).toBe(false)
+    expect(domainAllowed('junk', ['example.com'])).toBe(false)
   })
   it('is false with no allowlist', () => {
-    expect(domainAllowed('a@yourco.dev', undefined)).toBe(false)
+    expect(domainAllowed('a@example.com', undefined)).toBe(false)
   })
 })
 
 describe('classifyRecipient (§6.1, first match wins)', () => {
   const roster = ['backend@agentmail.to', 'frontend@agentmail.to']
-  const allowlistDomains = ['yourco.dev']
+  const allowlistDomains = ['example.com']
 
   it('1. a thread participant is auto', () => {
     expect(
       classifyRecipient({
-        recipient: 'Ada <ADA@elsewhere.com>',
-        threadParticipants: ['ada@elsewhere.com'],
+        recipient: 'Ada <ADA@example.net>',
+        threadParticipants: ['ada@example.net'],
         roster,
         allowlistDomains,
       }),
@@ -108,35 +110,39 @@ describe('classifyRecipient (§6.1, first match wins)', () => {
 
   it('3a. an individually allowlisted address is ask', () => {
     expect(
-      classifyRecipient({ recipient: 'Michael <MICHAEL@agentmail.cc>', roster, allowlistEmails: ['michael@agentmail.cc'] }),
+      classifyRecipient({
+        recipient: 'Owner <OWNER@Example.COM>',
+        roster,
+        allowlistEmails: ['owner@example.com'],
+      }),
     ).toEqual({ tier: 'ask', reason: 'allowlist-email' })
   })
 
-  it('3a. naming one address does not open their domain (dogfood blast radius)', () => {
+  it('3a. naming one address does not open their domain', () => {
     expect(
       classifyRecipient({
-        recipient: 'someone-else@agentmail.cc',
+        recipient: 'someone-else@example.com',
         roster,
-        allowlistEmails: ['michael@agentmail.cc'],
+        allowlistEmails: ['owner@example.com'],
       }),
     ).toEqual({ tier: 'never', reason: 'default-deny' })
   })
 
   it('3a. skips unparseable entries in the email allowlist', () => {
     expect(
-      classifyRecipient({ recipient: 'a@b.dev', allowlistEmails: ['garbage'] }).tier,
+      classifyRecipient({ recipient: 'a@example.org', allowlistEmails: ['garbage'] }).tier,
     ).toBe('never')
   })
 
   it('3. an allowlisted domain is ask', () => {
-    expect(classifyRecipient({ recipient: 'ada@yourco.dev', roster, allowlistDomains })).toEqual({
+    expect(classifyRecipient({ recipient: 'ada@example.com', roster, allowlistDomains })).toEqual({
       tier: 'ask',
       reason: 'allowlist-domain',
     })
   })
 
   it('4. everything else is never', () => {
-    expect(classifyRecipient({ recipient: 'stranger@example.com', roster, allowlistDomains })).toEqual({
+    expect(classifyRecipient({ recipient: 'stranger@example.org', roster, allowlistDomains })).toEqual({
       tier: 'never',
       reason: 'default-deny',
     })
@@ -150,13 +156,13 @@ describe('classifyRecipient (§6.1, first match wins)', () => {
   })
 
   it('is default-deny with no lists at all', () => {
-    expect(classifyRecipient({ recipient: 'a@b.dev' }).tier).toBe('never')
+    expect(classifyRecipient({ recipient: 'a@example.org' }).tier).toBe('never')
   })
 
   it('skips unparseable entries in the participant and roster lists', () => {
     expect(
       classifyRecipient({
-        recipient: 'a@b.dev',
+        recipient: 'a@example.org',
         threadParticipants: ['garbage'],
         roster: ['also garbage'],
       }).tier,
@@ -278,13 +284,13 @@ describe('isDeadThread (SPEC §4)', () => {
 
 describe('checkSender (§5.5 inbound gate)', () => {
   const base = {
-    requester: 'michael@yourco.dev',
+    requester: 'owner@example.com',
     roster: ['backend@agentmail.to'],
-    allowlistDomains: ['yourco.dev'],
+    allowlistDomains: ['example.com'],
   }
 
   it('accepts the requester', () => {
-    expect(checkSender({ ...base, from: 'Michael <michael@yourco.dev>' })).toEqual({
+    expect(checkSender({ ...base, from: 'Owner <owner@example.com>' })).toEqual({
       ok: true,
       reason: 'requester',
     })
@@ -293,25 +299,25 @@ describe('checkSender (§5.5 inbound gate)', () => {
     expect(checkSender({ ...base, from: 'backend@agentmail.to' }).reason).toBe('roster')
   })
   it('accepts an allowlisted domain', () => {
-    expect(checkSender({ ...base, from: 'ada@yourco.dev' }).reason).toBe('allowlisted')
+    expect(checkSender({ ...base, from: 'ada@example.com' }).reason).toBe('allowlisted')
   })
   it('accepts an individually allowlisted address', () => {
     expect(
-      checkSender({ from: 'michael@agentmail.cc', allowlistEmails: ['michael@agentmail.cc'] }),
+      checkSender({ from: 'owner@example.com', allowlistEmails: ['owner@example.com'] }),
     ).toEqual({ ok: true, reason: 'allowlisted-email' })
   })
   it('refuses a colleague of an individually allowlisted address', () => {
     expect(
-      checkSender({ from: 'other@agentmail.cc', allowlistEmails: ['michael@agentmail.cc'] }).ok,
+      checkSender({ from: 'other@example.com', allowlistEmails: ['owner@example.com'] }).ok,
     ).toBe(false)
   })
   it('accepts a participant of an active thread', () => {
     expect(
-      checkSender({ ...base, from: 'ada@elsewhere.com', activeThreadParticipants: ['ada@elsewhere.com'] }),
+      checkSender({ ...base, from: 'ada@example.net', activeThreadParticipants: ['ada@example.net'] }),
     ).toEqual({ ok: true, reason: 'thread-participant' })
   })
   it('refuses everyone else', () => {
-    expect(checkSender({ ...base, from: 'stranger@example.com' })).toEqual({
+    expect(checkSender({ ...base, from: 'stranger@example.org' })).toEqual({
       ok: false,
       reason: 'not-allowed',
     })
@@ -320,6 +326,6 @@ describe('checkSender (§5.5 inbound gate)', () => {
     expect(checkSender({ ...base, from: 'junk' }).ok).toBe(false)
   })
   it('refuses when nothing is configured', () => {
-    expect(checkSender({ from: 'a@b.dev' }).ok).toBe(false)
+    expect(checkSender({ from: 'a@example.org' }).ok).toBe(false)
   })
 })

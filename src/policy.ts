@@ -78,8 +78,8 @@ function normalizeAll(list: readonly string[] | undefined): Set<string> {
 }
 
 /**
- * Domain match is exact or a subdomain of an allowlisted domain: `yourco.dev`
- * covers `mail.yourco.dev` but never `notyourco.dev`.
+ * Domain match is exact or a subdomain of an allowlisted domain: `example.com`
+ * covers `mail.example.com` but never `notexample.com`.
  */
 export function domainAllowed(
   address: string,

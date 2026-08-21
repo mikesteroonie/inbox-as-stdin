@@ -217,8 +217,8 @@ committed by the agent along with its work.
 ```yaml
 pod: swarm-demo
 allowlist:
-  domains: [yourco.dev]          # tier-ask eligible; everything else is tier-never
-requester: michael@yourco.dev    # default CC + permission-gate recipient
+  domains: [example.com]          # tier-ask eligible; everything else is tier-never
+requester: owner@example.com    # default CC + permission-gate recipient
 budgets: { usd: 5, max_hops: 6, questions_per_person_week: 3 }
 agents:
   - name: backend

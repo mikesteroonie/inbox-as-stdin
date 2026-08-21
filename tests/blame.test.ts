@@ -8,20 +8,20 @@ import { blameRegion, dedupeAuthors, headSha, parseLogL } from '../src/harness/b
 describe('parseLogL', () => {
   it('parses the tab-separated format', () => {
     const out = parseLogL(
-      'da16902702dbc8ac089a8da39214568ebf234272\tBob\tBob@X.dev\t2026-08-20T07:28:12+00:00\n',
+      'da16902702dbc8ac089a8da39214568ebf234272\tBob\tBob@Example.ORG\t2026-08-20T07:28:12+00:00\n',
     )
     expect(out).toEqual([
       {
         sha: 'da16902702dbc8ac089a8da39214568ebf234272',
         author: 'Bob',
-        email: 'bob@x.dev',
+        email: 'bob@example.org',
         date: '2026-08-20T07:28:12+00:00',
       },
     ])
   })
 
   it('skips blank and malformed lines rather than throwing', () => {
-    expect(parseLogL('\n\nnot a log line\nzzz\tA\ta@x.dev\t2026\n')).toEqual([])
+    expect(parseLogL('\n\nnot a log line\nzzz\tA\ta@example.org\t2026\n')).toEqual([])
   })
 
   it('keeps an unparseable email as-is, lowercased', () => {
@@ -32,9 +32,9 @@ describe('parseLogL', () => {
 describe('dedupeAuthors', () => {
   it('keeps the most recent commit per author, in order', () => {
     const entries = [
-      { sha: 'a', author: 'Bob', email: 'b@x.dev', date: '3' },
-      { sha: 'b', author: 'Ada', email: 'a@x.dev', date: '2' },
-      { sha: 'c', author: 'Bob', email: 'b@x.dev', date: '1' },
+      { sha: 'a', author: 'Bob', email: 'b@example.org', date: '3' },
+      { sha: 'b', author: 'Ada', email: 'a@example.org', date: '2' },
+      { sha: 'c', author: 'Bob', email: 'b@example.org', date: '1' },
     ]
     expect(dedupeAuthors(entries).map((e) => e.sha)).toEqual(['a', 'b'])
   })
@@ -49,12 +49,12 @@ describe('blameRegion against a real repo', () => {
       execFileSync('git', args, { cwd: repo, stdio: 'pipe' })
     }
     git('init', '-q', '.')
-    git('config', 'user.email', 'ada@yourco.dev')
+    git('config', 'user.email', 'ada@example.com')
     git('config', 'user.name', 'Ada Lovelace')
     writeFileSync(join(repo, 'retry.ts'), 'one\ntwo\nthree\nfour\nfive\n')
     git('add', '-A')
     git('commit', '-qm', 'first')
-    git('config', 'user.email', 'bob@yourco.dev')
+    git('config', 'user.email', 'bob@example.com')
     git('config', 'user.name', 'Bob Barker')
     writeFileSync(join(repo, 'retry.ts'), 'one\ntwo\nTHREE\nfour\nfive\n')
     git('commit', '-qam', 'second')
@@ -62,14 +62,14 @@ describe('blameRegion against a real repo', () => {
 
   it('returns the region authors, most recent first', async () => {
     const result = await blameRegion({ cwd: repo, file: 'retry.ts', lineStart: 3, lineEnd: 4 })
-    expect(result.authors.map((a) => a.email)).toEqual(['bob@yourco.dev', 'ada@yourco.dev'])
+    expect(result.authors.map((a) => a.email)).toEqual(['bob@example.com', 'ada@example.com'])
     expect(result.authors[0]!.author).toBe('Bob Barker')
   })
 
   it('gives the fallback chain the bounce retry needs (§6.3)', async () => {
     const result = await blameRegion({ cwd: repo, file: 'retry.ts', lineStart: 3, lineEnd: 3 })
-    const next = result.authors.find((a) => a.email !== 'bob@yourco.dev')
-    expect(next?.email).toBe('ada@yourco.dev')
+    const next = result.authors.find((a) => a.email !== 'bob@example.com')
+    expect(next?.email).toBe('ada@example.com')
   })
 
   it('normalizes a reversed or zero range', async () => {

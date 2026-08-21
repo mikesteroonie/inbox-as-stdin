@@ -65,10 +65,10 @@ describe('render', () => {
 describe('renderPrompt', () => {
   it('fills a real template', () => {
     const out = renderPrompt('outreach-footer', {
-      requester: 'michael@yourco.dev',
+      requester: 'owner@example.com',
       agent_display_name: 'Backend Agent',
     })
-    expect(out).toContain('michael@yourco.dev')
+    expect(out).toContain('owner@example.com')
     expect(out).toContain('Backend Agent')
     expect(missingVars(loadPrompt('outreach-footer'), {
       requester: 'x',

@@ -15,7 +15,7 @@
 
 /** Attribution lines that introduce quoted text. Anchored at line start. */
 const ATTRIBUTION: RegExp[] = [
-  // "On Mon, Aug 17, 2026 at 9:04 AM Ada Lovelace <ada@x.dev> wrote:" —
+  // "On Mon, Aug 17, 2026 at 9:04 AM Ada Lovelace <ada@example.org> wrote:" —
   // possibly wrapped across two lines by the sending client.
   /^\s*On\b[\s\S]{0,200}?\bwrote:\s*$/,
   /^\s*On\b.{0,200}$/,

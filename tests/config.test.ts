@@ -5,7 +5,7 @@ import { ConfigError, apiKeyEnvName, apiKeyFor, budgetsFor, validateConfig } fro
 
 const minimal = {
   pod: 'swarm',
-  requester: 'michael@yourco.dev',
+  requester: 'owner@example.com',
   agents: [{ name: 'backend', inbox: 'backend' }],
 }
 
@@ -18,11 +18,11 @@ describe('validateConfig', () => {
     expect(cfg.agents[0]!.repo).toBe('.')
   })
 
-  it('validates the dogfood config, and it reaches exactly one human', () => {
-    const cfg = validateConfig(parseYaml(readFileSync('harness.dogfood.yaml', 'utf8')))
+  it('validates the single-human template, and it reaches exactly one person', () => {
+    const cfg = validateConfig(parseYaml(readFileSync('harness.solo.yaml', 'utf8')))
     expect(cfg.allowlist.domains).toEqual([])
-    expect(cfg.allowlist.emails).toEqual(['michael@agentmail.cc'])
-    expect(cfg.requester).toBe('michael@agentmail.cc')
+    expect(cfg.allowlist.emails).toEqual(['you@example.com'])
+    expect(cfg.requester).toBe('you@example.com')
   })
 
   it('rejects a non-address in the email allowlist', () => {
