@@ -16,6 +16,7 @@ export interface TierVerdict {
     | 'thread-participant'
     | 'pod-roster'
     | 'allowlist-domain'
+    | 'allowlist-email'
     | 'default-deny'
     | 'invalid-address'
 }
@@ -28,6 +29,12 @@ export interface TierInput {
   roster?: readonly string[]
   /** Domains eligible for tier-ask. */
   allowlistDomains?: readonly string[]
+  /**
+   * Individual addresses eligible for tier-ask. Narrower than a domain and
+   * checked the same way: naming one person is how you get a genuinely
+   * single-human blast radius, which a domain entry cannot express.
+   */
+  allowlistEmails?: readonly string[]
 }
 
 /**
@@ -97,6 +104,9 @@ export function classifyRecipient(input: TierInput): TierVerdict {
   }
   if (normalizeAll(input.roster).has(recipient)) {
     return { tier: 'auto', reason: 'pod-roster' }
+  }
+  if (normalizeAll(input.allowlistEmails).has(recipient)) {
+    return { tier: 'ask', reason: 'allowlist-email' }
   }
   if (domainAllowed(recipient, input.allowlistDomains)) {
     return { tier: 'ask', reason: 'allowlist-domain' }
@@ -189,7 +199,13 @@ export function isDeadThread(updatedAt: number, ttlDays: number, now = Date.now(
 
 export interface SenderVerdict {
   ok: boolean
-  reason: 'allowlisted' | 'roster' | 'thread-participant' | 'requester' | 'not-allowed'
+  reason:
+    | 'allowlisted'
+    | 'allowlisted-email'
+    | 'roster'
+    | 'thread-participant'
+    | 'requester'
+    | 'not-allowed'
 }
 
 /**
@@ -202,12 +218,14 @@ export function checkSender(input: {
   requester?: string
   roster?: readonly string[]
   allowlistDomains?: readonly string[]
+  allowlistEmails?: readonly string[]
   activeThreadParticipants?: readonly string[]
 }): SenderVerdict {
   const from = normalizeAddress(input.from)
   if (from === undefined) return { ok: false, reason: 'not-allowed' }
   if (normalizeAddress(input.requester) === from) return { ok: true, reason: 'requester' }
   if (normalizeAll(input.roster).has(from)) return { ok: true, reason: 'roster' }
+  if (normalizeAll(input.allowlistEmails).has(from)) return { ok: true, reason: 'allowlisted-email' }
   if (domainAllowed(from, input.allowlistDomains)) return { ok: true, reason: 'allowlisted' }
   if (normalizeAll(input.activeThreadParticipants).has(from)) {
     return { ok: true, reason: 'thread-participant' }
