@@ -13,6 +13,7 @@
 
 import { AgentMailClient } from 'agentmail'
 import type { AgentMail } from 'agentmail'
+import { clientId } from '../ids.js'
 import { logger } from '../log.js'
 import { normalizeAddress } from '../policy.js'
 import { extractReply } from '../reply.js'
@@ -69,7 +70,7 @@ export class AgentMailTransport implements MailTransport {
         username,
         displayName,
         // clientId makes creation idempotent across reruns of `harness init`.
-        clientId: `harness:${username}`,
+        clientId: clientId('harness', username),
         ...(this.opts.domain ? { domain: this.opts.domain } : {}),
       })
       return { inboxId: inbox.inboxId, email: inbox.email }

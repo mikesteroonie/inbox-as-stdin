@@ -32,6 +32,21 @@ export function isTaskId(value: string): boolean {
   return TASK_ID_RE.test(value)
 }
 
+/**
+ * AgentMail client ids are restricted to `A-Z a-z 0-9 - . _ ~`. Anything else
+ * — a colon, a space, an accent — is rejected with a 400 at create time, so
+ * every id we mint gets folded into that set rather than trusting whatever a
+ * person typed at the `init` prompt.
+ */
+export function clientId(prefix: string, name: string): string {
+  const safe = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._~-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+  return `${prefix}-${safe || 'default'}`
+}
+
 const QUESTION_ID_RE = /^q_[a-z2-7]{10}$/
 
 export function isQuestionId(value: string): boolean {
