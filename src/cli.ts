@@ -1,11 +1,9 @@
-#!/usr/bin/env node
 /**
  * `harness` (§9): init | up | send | tail | doctor.
  */
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { input, select } from '@inquirer/prompts'
 import { Command } from 'commander'
@@ -742,7 +740,7 @@ function buildTransports(cfg: HarnessConfig): Map<string, MailTransport> {
 
 /* ----------------------------------------------------------------- main */
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   await loadDotEnv()
   await program.parseAsync(process.argv)
 }
@@ -760,26 +758,4 @@ async function loadDotEnv(path = '.env'): Promise<void> {
     const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
     if (process.env[key] === undefined) process.env[key] = value
   }
-}
-
-/**
- * Only parse argv when this module *is* the program. Importing it — which the
- * tests do, for `describeError` and the name helpers — must not run the CLI
- * against vitest's argv and exit the process out from under the suite.
- */
-function isEntryPoint(): boolean {
-  const entry = process.argv[1]
-  if (entry === undefined) return false
-  try {
-    return import.meta.url === pathToFileURL(entry).href
-  } catch {
-    return false
-  }
-}
-
-if (isEntryPoint()) {
-  main().catch((err) => {
-    console.error(err instanceof Error ? err.message : String(err))
-    process.exit(1)
-  })
 }

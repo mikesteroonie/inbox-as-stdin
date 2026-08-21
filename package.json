@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Email as the interface to a pod of coding agents. The inbox is stdin.",
   "bin": {
-    "harness": "./dist/cli.js"
+    "harness": "./dist/bin.js"
   },
   "engines": {
     "node": ">=20"
