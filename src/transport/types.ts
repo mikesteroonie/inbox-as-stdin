@@ -112,6 +112,25 @@ export interface MessageRef {
   at: number
 }
 
+/**
+ * The requested inbox username is already in use. Carries whatever
+ * alternatives the provider offered, so a caller can present a choice rather
+ * than a dead end. A domain error, not a provider one — §2 keeps provider
+ * types on the far side of this interface.
+ */
+export class InboxTakenError extends Error {
+  constructor(
+    readonly username: string,
+    readonly suggestions: readonly string[],
+  ) {
+    super(
+      `The inbox "${username}" is already taken` +
+        (suggestions.length > 0 ? `. Available: ${suggestions.join(', ')}` : ''),
+    )
+    this.name = 'InboxTakenError'
+  }
+}
+
 export interface MailTransport {
   // identity
   ensureInbox(username: string, displayName: string): Promise<{ inboxId: string; email: string }>

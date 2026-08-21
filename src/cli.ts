@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
-import { createInterface } from 'node:readline/promises'
+import { input, select } from '@inquirer/prompts'
 import { Command } from 'commander'
 import { stringify as toYaml } from 'yaml'
 import { apiKeyEnvName, apiKeyFor, budgetsFor, loadConfig, ConfigError, type HarnessConfig } from './config.js'
@@ -18,7 +18,7 @@ import { logger } from './log.js'
 import { PRICES, RECOMMENDED_MODEL, validateModels } from './pricing.js'
 import { Store } from './store.js'
 import { AgentMailTransport } from './transport/agentmail.js'
-import type { MailTransport } from './transport/types.js'
+import { InboxTakenError, type MailTransport } from './transport/types.js'
 import { ANSWERS_PATH, DECISIONS_PATH, syncDecisions } from './harness/answers.js'
 
 const log = logger('cli')
@@ -41,23 +41,6 @@ program
   .option('--domain <domain>', 'inbox domain (defaults to the AgentMail org default)')
   .option('-y, --yes', 'accept every default without prompting (scripts, CI)')
   .action(async (opts) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout })
-    /**
-     * Ask, or take the default. A closed stdin — `--yes`, a pipe that ran out,
-     * CI — is not a failure: it means every remaining answer is its default,
-     * which is the whole point of having defaults.
-     */
-    const ask = async (q: string, fallback = ''): Promise<string> => {
-      if (opts.yes) return fallback
-      try {
-        const answer = (await rl.question(fallback ? `${q} [${fallback}] ` : `${q} `)).trim()
-        return answer || fallback
-      } catch {
-        console.log(`${q} [${fallback}]  (no input — using the default)`)
-        return fallback
-      }
-    }
-
     try {
       if (existsSync(opts.config)) {
         console.error(`${opts.config} already exists. Move it aside first.`)
@@ -71,79 +54,90 @@ program
         return
       }
 
-      const pod = opts.pod ?? (await ask('Pod name?', 'swarm'))
-      const requester = opts.requester ?? (await ask('Your email (permission gate + default CC)?'))
+      const auto = Boolean(opts.yes)
+      console.log(`\n${bold('harness init')} — creating a pod of agents that work over email.\n`)
+
+      const pod = opts.pod ?? (await ask({ message: 'Pod name', default: 'swarm', auto }))
+      const requester =
+        opts.requester ??
+        (await ask({
+          message: 'Your email (permission gate + default CC)',
+          auto,
+          validate: (v) => (v.includes('@') ? true : 'The permission gate has to reach a real address.'),
+        }))
       if (!requester.includes('@')) {
-        if (opts.yes) {
-          console.error('--yes needs --requester: there is no sensible default for your address.')
-          process.exitCode = 1
-          return
-        }
-        console.error('A requester email is required — the permission gate has to reach someone.')
+        console.error('--yes needs --requester: there is no sensible default for your address.')
         process.exitCode = 1
         return
       }
-      const agentNames = (opts.agents ?? (await ask('Agent names, comma-separated?', 'backend')))
-        .split(',')
-        .map((s: string) => s.trim().toLowerCase().replace(/\s+/g, '-'))
-        .filter(Boolean)
-      const badName = agentNames.find((n: string) => !/^[a-z0-9][a-z0-9-]*$/.test(n))
-      if (badName !== undefined) {
-        console.error(
-          `"${badName}" is not a usable agent name. Use lowercase letters, digits and dashes — ` +
-            `the name becomes an inbox address and a config key.`,
-        )
-        process.exitCode = 1
-        return
-      }
-      const domains = (await ask('Allowlisted domains for tier-ask outreach, comma-separated?', requester.split('@')[1] ?? ''))
-        .split(',')
-        .map((s: string) => s.trim())
-        .filter(Boolean)
+
+      const agentNames = normalizeAgentNames(
+        opts.agents ??
+          (await ask({
+            message: 'Agent names, comma-separated',
+            default: 'backend',
+            auto,
+            validate: (v) =>
+              normalizeAgentNames(v).length > 0 ? true : 'Give at least one name, e.g. backend, frontend.',
+          })),
+      )
+
+      const scope = auto
+        ? 'person'
+        : await select({
+            message: 'Who may the agents email for help?',
+            choices: [
+              {
+                name: `Only me (${requester})`,
+                value: 'person',
+                description: 'Nobody else is reachable. The safest place to start.',
+              },
+              {
+                name: `Anyone at ${requester.split('@')[1]}`,
+                value: 'domain',
+                description: 'Every colleague becomes reachable, each still behind your yes/no gate.',
+              },
+              { name: 'Nobody yet — I will edit the config later', value: 'none', description: '' },
+            ],
+          })
 
       const transport = new AgentMailTransport({
         apiKey: orgKey,
         ...(opts.domain ? { domain: opts.domain } : {}),
       })
 
+      console.log('')
       const podId = await ensurePod(transport, pod)
       const envLines: string[] = []
       const agents: HarnessConfig['agents'] = []
 
       for (const name of agentNames) {
-        const display = await ask(`Display name for "${name}"?`, `${title(name)} Agent`)
-        let repo = await ask(`Repo for "${name}" (path or git URL)?`, '.')
-        if (!looksLikeRepo(repo)) {
-          console.log(`  note: "${repo}" is not a git repo or a URL.`)
-          repo = await ask(`  Repo for "${name}" — path or git URL?`, '.')
-          if (!looksLikeRepo(repo)) {
-            console.log(`  keeping "${repo}"; fix \`agents[].repo\` in ${opts.config} before \`harness up\`.`)
-          }
-        }
+        const display = await ask({
+          message: `Display name for "${name}"`,
+          default: `${title(name)} Agent`,
+          auto,
+        })
+        const repo = await askRepo(name, auto)
 
-        let inboxId: string
-        let email: string
-        try {
-          ;({ inboxId, email } = await transport.ensureInbox(name, display))
-          console.log(`  ok   inbox ${email}`)
-        } catch (err) {
-          console.error(`  FAIL inbox for "${name}" — ${describeError(err)}`)
+        const inbox = await claimInbox(transport, name, display, auto)
+        if (!inbox) {
           console.error(
-            `\nNothing was written. Fix the above and re-run \`harness init\` — inbox creation ` +
-              `is idempotent, so anything already created will be reused.`,
+            `\nNothing was written. Re-run \`harness init\` when you have a name to use — ` +
+              `inbox creation is idempotent, so anything already created will be reused.`,
           )
           process.exitCode = 1
           return
         }
+        console.log(`  ${tick} inbox  ${inbox.email}`)
 
-        const key = await mintKey(transport, inboxId, name)
+        const key = await mintKey(transport, inbox.inboxId, name)
         if (key) {
           envLines.push(`${apiKeyEnvName(name)}=${key}`)
-          console.log(`  ok   key   ${apiKeyEnvName(name)}`)
+          console.log(`  ${tick} key    ${apiKeyEnvName(name)}`)
         }
         agents.push({
           name,
-          inbox: email,
+          inbox: inbox.email,
           display_name: display,
           repo,
           tools: ['read', 'write', 'bash', 'send_email_to_agent', 'ask_code_author'],
@@ -151,40 +145,155 @@ program
         })
       }
 
+      const allowlist =
+        scope === 'person'
+          ? { domains: [], emails: [requester] }
+          : scope === 'domain'
+            ? { domains: [requester.split('@')[1] ?? ''], emails: [] }
+            : { domains: [], emails: [] }
+
       const cfg: Record<string, unknown> = {
         pod,
         ...(podId ? { pod_id: podId } : {}),
-        allowlist: { domains },
+        allowlist,
         requester,
         budgets: { usd: 5, max_hops: 6, questions_per_person_week: 3, max_concurrent: 3 },
         envelope: 'headers',
+        pr: 'auto',
         agents,
       }
       await writeFile(opts.config, header() + toYaml(cfg), 'utf8')
+      console.log(`  ${tick} config ${opts.config}`)
       if (envLines.length > 0) {
         await appendFile('.env', (existsSync('.env') ? '\n' : '') + envLines.join('\n') + '\n', 'utf8')
+        console.log(`  ${tick} keys   ${envLines.length} written to .env`)
       }
       new Store('.harness/journal.db').close()
 
-      console.log(`  ok   wrote ${opts.config}`)
-      if (envLines.length > 0) console.log(`  ok   wrote ${envLines.length} key(s) to .env`)
-      console.log(`\nPod "${pod}" is ready: ${agents.map((a) => a.inbox).join(', ')}`)
-      if (domains.length > 0) {
-        console.log(
-          `\nHeads up: \`allowlist.domains: [${domains.join(', ')}]\` makes every address at ` +
-            `${domains.length === 1 ? 'that domain' : 'those domains'} reachable for outreach. To ` +
-            `reach exactly one person instead, set \`allowlist.emails: [${requester}]\` and empty ` +
-            `the domain list.`,
-        )
-      }
+      console.log(`\n${bold(`Pod "${pod}" is ready.`)}`)
+      for (const a of agents) console.log(`  ${a.display_name ?? a.name}  ${a.inbox}`)
+      console.log(
+        scope === 'domain'
+          ? `\nOutreach: anyone at ${requester.split('@')[1]}, each ask gated by your yes/no reply.`
+          : scope === 'person'
+            ? `\nOutreach: only ${requester}. Nobody else is reachable.`
+            : `\nOutreach: nobody yet — add addresses to \`allowlist.emails\` in ${opts.config}.`,
+      )
       console.log('\nNext: `harness doctor`, then `harness up`.')
     } catch (err) {
+      if (isCancel(err)) {
+        console.log('\nCancelled. Nothing was written.')
+        return
+      }
       console.error(`\ninit failed — ${describeError(err)}`)
       process.exitCode = 1
-    } finally {
-      rl.close()
     }
   })
+
+const tick = '\u2713'
+const bold = (text: string): string => `\u001b[1m${text}\u001b[0m`
+const dim = (text: string): string => `\u001b[2m${text}\u001b[0m`
+
+/** Ctrl-C out of a prompt is a cancellation, not a crash. */
+function isCancel(err: unknown): boolean {
+  return (err as { name?: string })?.name === 'ExitPromptError'
+}
+
+async function ask(opts: {
+  message: string
+  default?: string
+  auto: boolean
+  validate?: (value: string) => true | string
+}): Promise<string> {
+  if (opts.auto) return opts.default ?? ''
+  return (
+    await input({
+      message: opts.message,
+      ...(opts.default !== undefined ? { default: opts.default } : {}),
+      ...(opts.validate ? { validate: opts.validate } : {}),
+    })
+  ).trim()
+}
+
+export function normalizeAgentNames(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase().replace(/\s+/g, '-'))
+    .filter((s) => /^[a-z0-9][a-z0-9-]*$/.test(s))
+}
+
+async function askRepo(name: string, auto: boolean): Promise<string> {
+  if (auto) return '.'
+  const repo = await input({
+    message: `Repo "${name}" works on ${dim('(path or git URL)')}`,
+    default: '.',
+    validate: (value: string) =>
+      looksLikeRepo(value.trim())
+        ? true
+        : `"${value.trim()}" is not a git repo or a clone URL. Give a path containing .git, or a URL.`,
+  })
+  return repo.trim()
+}
+
+/**
+ * Claim an inbox, and when the username is taken, offer the alternatives the
+ * provider suggested rather than dying. The shared `agentmail.to` domain means
+ * obvious names — friday, backend — are frequently gone, so this is the normal
+ * path, not an edge case.
+ */
+async function claimInbox(
+  transport: AgentMailTransport,
+  name: string,
+  display: string,
+  auto: boolean,
+): Promise<{ inboxId: string; email: string } | undefined> {
+  let username = name
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await transport.ensureInbox(username, display)
+    } catch (err) {
+      if (!(err instanceof InboxTakenError)) {
+        console.error(`  ${'\u2717'} inbox for "${name}" — ${describeError(err)}`)
+        return undefined
+      }
+      console.log(`  ${'\u2717'} "${username}" is taken on this domain.`)
+      if (auto) {
+        const fallback = err.suggestions[0]
+        if (fallback === undefined) return undefined
+        console.log(`     using "${fallback}"`)
+        username = fallback
+        continue
+      }
+      const choices = [
+        ...err.suggestions.map((s) => ({ name: s, value: s })),
+        { name: 'Type a different name…', value: '\u0000custom' },
+        { name: 'Cancel', value: '\u0000cancel' },
+      ]
+      const picked = await select({
+        message: `Pick an inbox name for "${name}"`,
+        choices,
+        ...(err.suggestions.length > 0 ? { default: err.suggestions[0] } : {}),
+      })
+      if (picked === '\u0000cancel') return undefined
+      username =
+        picked === '\u0000custom'
+          ? (
+              await input({
+                message: `Inbox name for "${name}"`,
+                validate: (v: string) =>
+                  /^[a-z0-9][a-z0-9._-]*$/.test(v.trim().toLowerCase())
+                    ? true
+                    : 'Lowercase letters, digits, dots, dashes and underscores.',
+              })
+            )
+              .trim()
+              .toLowerCase()
+          : picked
+    }
+  }
+  console.error(`  Gave up finding a free inbox name for "${name}".`)
+  return undefined
+}
 
 /** A path we can actually cut a worktree from, or a URL we can clone. */
 function looksLikeRepo(spec: string): boolean {
