@@ -4,11 +4,13 @@
  */
 
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline/promises'
 import { Command } from 'commander'
 import { stringify as toYaml } from 'yaml'
 import { apiKeyEnvName, apiKeyFor, budgetsFor, loadConfig, ConfigError, type HarnessConfig } from './config.js'
+import { clientId } from './ids.js'
 import { Daemon } from './daemon.js'
 import { agentForInbox, inboxOf } from './dispatch.js'
 import * as envelope from './envelope.js'
@@ -37,11 +39,23 @@ program
   .option('--requester <email>', 'default CC and permission-gate recipient')
   .option('--agents <names>', 'comma-separated agent names')
   .option('--domain <domain>', 'inbox domain (defaults to the AgentMail org default)')
+  .option('-y, --yes', 'accept every default without prompting (scripts, CI)')
   .action(async (opts) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout })
+    /**
+     * Ask, or take the default. A closed stdin — `--yes`, a pipe that ran out,
+     * CI — is not a failure: it means every remaining answer is its default,
+     * which is the whole point of having defaults.
+     */
     const ask = async (q: string, fallback = ''): Promise<string> => {
-      const answer = (await rl.question(fallback ? `${q} [${fallback}] ` : `${q} `)).trim()
-      return answer || fallback
+      if (opts.yes) return fallback
+      try {
+        const answer = (await rl.question(fallback ? `${q} [${fallback}] ` : `${q} `)).trim()
+        return answer || fallback
+      } catch {
+        console.log(`${q} [${fallback}]  (no input — using the default)`)
+        return fallback
+      }
     }
 
     try {
@@ -60,14 +74,28 @@ program
       const pod = opts.pod ?? (await ask('Pod name?', 'swarm'))
       const requester = opts.requester ?? (await ask('Your email (permission gate + default CC)?'))
       if (!requester.includes('@')) {
+        if (opts.yes) {
+          console.error('--yes needs --requester: there is no sensible default for your address.')
+          process.exitCode = 1
+          return
+        }
         console.error('A requester email is required — the permission gate has to reach someone.')
         process.exitCode = 1
         return
       }
       const agentNames = (opts.agents ?? (await ask('Agent names, comma-separated?', 'backend')))
         .split(',')
-        .map((s: string) => s.trim().toLowerCase())
+        .map((s: string) => s.trim().toLowerCase().replace(/\s+/g, '-'))
         .filter(Boolean)
+      const badName = agentNames.find((n: string) => !/^[a-z0-9][a-z0-9-]*$/.test(n))
+      if (badName !== undefined) {
+        console.error(
+          `"${badName}" is not a usable agent name. Use lowercase letters, digits and dashes — ` +
+            `the name becomes an inbox address and a config key.`,
+        )
+        process.exitCode = 1
+        return
+      }
       const domains = (await ask('Allowlisted domains for tier-ask outreach, comma-separated?', requester.split('@')[1] ?? ''))
         .split(',')
         .map((s: string) => s.trim())
@@ -84,11 +112,35 @@ program
 
       for (const name of agentNames) {
         const display = await ask(`Display name for "${name}"?`, `${title(name)} Agent`)
-        const repo = await ask(`Repo for "${name}" (path or git URL)?`, '.')
-        const { inboxId, email } = await transport.ensureInbox(name, display)
-        console.log(`  inbox ready: ${email}`)
+        let repo = await ask(`Repo for "${name}" (path or git URL)?`, '.')
+        if (!looksLikeRepo(repo)) {
+          console.log(`  note: "${repo}" is not a git repo or a URL.`)
+          repo = await ask(`  Repo for "${name}" — path or git URL?`, '.')
+          if (!looksLikeRepo(repo)) {
+            console.log(`  keeping "${repo}"; fix \`agents[].repo\` in ${opts.config} before \`harness up\`.`)
+          }
+        }
+
+        let inboxId: string
+        let email: string
+        try {
+          ;({ inboxId, email } = await transport.ensureInbox(name, display))
+          console.log(`  ok   inbox ${email}`)
+        } catch (err) {
+          console.error(`  FAIL inbox for "${name}" — ${describeError(err)}`)
+          console.error(
+            `\nNothing was written. Fix the above and re-run \`harness init\` — inbox creation ` +
+              `is idempotent, so anything already created will be reused.`,
+          )
+          process.exitCode = 1
+          return
+        }
+
         const key = await mintKey(transport, inboxId, name)
-        if (key) envLines.push(`${apiKeyEnvName(name)}=${key}`)
+        if (key) {
+          envLines.push(`${apiKeyEnvName(name)}=${key}`)
+          console.log(`  ok   key   ${apiKeyEnvName(name)}`)
+        }
         agents.push({
           name,
           inbox: email,
@@ -114,12 +166,31 @@ program
       }
       new Store('.harness/journal.db').close()
 
-      console.log(`\nWrote ${opts.config} and ${envLines.length} key(s) to .env (keys never go in yaml).`)
-      console.log('Next: `harness doctor` to verify the round-trip, then `harness up`.')
+      console.log(`  ok   wrote ${opts.config}`)
+      if (envLines.length > 0) console.log(`  ok   wrote ${envLines.length} key(s) to .env`)
+      console.log(`\nPod "${pod}" is ready: ${agents.map((a) => a.inbox).join(', ')}`)
+      if (domains.length > 0) {
+        console.log(
+          `\nHeads up: \`allowlist.domains: [${domains.join(', ')}]\` makes every address at ` +
+            `${domains.length === 1 ? 'that domain' : 'those domains'} reachable for outreach. To ` +
+            `reach exactly one person instead, set \`allowlist.emails: [${requester}]\` and empty ` +
+            `the domain list.`,
+        )
+      }
+      console.log('\nNext: `harness doctor`, then `harness up`.')
+    } catch (err) {
+      console.error(`\ninit failed — ${describeError(err)}`)
+      process.exitCode = 1
     } finally {
       rl.close()
     }
   })
+
+/** A path we can actually cut a worktree from, or a URL we can clone. */
+function looksLikeRepo(spec: string): boolean {
+  if (/^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/.test(spec)) return true
+  return existsSync(join(spec, '.git'))
+}
 
 function header(): string {
   return [
@@ -138,10 +209,11 @@ async function ensurePod(transport: AgentMailTransport, name: string): Promise<s
     const pods = await transport.raw.pods.list()
     const existing = pods.pods.find((p) => p.name === name)
     if (existing) return existing.podId
-    const created = await transport.raw.pods.create({ name, clientId: `harness:${name}` })
+    const created = await transport.raw.pods.create({ name, clientId: clientId('harness', name) })
     return created.podId
   } catch (err) {
-    log.warn('could not create a pod; continuing without pod scoping', { err: String(err) })
+    console.log(`  note: no pod scoping — ${describeError(err)}`)
+    console.log('        (harmless: the daemon subscribes per-inbox instead)')
     return undefined
   }
 }
@@ -155,7 +227,8 @@ async function mintKey(
     const key = await transport.raw.inboxes.apiKeys.create(inboxId, { name: `harness-${name}` })
     return key.apiKey
   } catch (err) {
-    log.warn('could not mint a per-inbox key; the org key will be used', { agent: name, err: String(err) })
+    console.log(`  note: no per-inbox key for "${name}" — ${describeError(err)}`)
+    console.log('        (the org key will be used instead)')
     return undefined
   }
 }
