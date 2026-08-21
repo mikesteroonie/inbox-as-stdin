@@ -17,6 +17,7 @@ import { clientId } from '../ids.js'
 import { logger } from '../log.js'
 import { normalizeAddress } from '../policy.js'
 import { extractReply } from '../reply.js'
+import { InboxTakenError } from './types.js'
 import type {
   ArmorVerdict,
   MailEvent,
@@ -78,7 +79,8 @@ export class AgentMailTransport implements MailTransport {
       // A concurrent create (or a pre-existing clientId) races us; re-read.
       const found = await this.findInbox(username)
       if (found) return found
-      throw err
+      const taken = asTakenError(err, username)
+      throw taken ?? err
     }
   }
 
@@ -225,6 +227,63 @@ export class AgentMailTransport implements MailTransport {
       ...(remove.length ? { removeLabels: remove } : {}),
     })
   }
+}
+
+/**
+ * Recognise "that username is taken" and pull the alternatives out of it.
+ *
+ * AgentMail returns the suggestions inside the free-text `fix` field rather
+ * than a structured list, e.g.
+ *
+ *   "Retry with a different value — these usernames are currently available:
+ *    friday827, friday_hq, fridayops"
+ *
+ * so this parses them out. A parse that finds nothing still produces the typed
+ * error: knowing the name is taken is useful even without alternatives.
+ */
+export function asTakenError(err: unknown, username: string): InboxTakenError | undefined {
+  const body = (err as { body?: unknown })?.body
+  const record =
+    body && typeof body === 'object'
+      ? (body as Record<string, unknown>)
+      : typeof body === 'string'
+        ? safeParse(body)
+        : undefined
+  const name = String(record?.name ?? (err as { name?: string })?.name ?? '')
+  const code = String(record?.code ?? '')
+  const message = String(record?.message ?? '')
+  const isTaken =
+    name === 'IsTakenError' ||
+    code === 'resource_taken' ||
+    /\bis taken\b|already (?:in use|taken)/i.test(message)
+  if (!isTaken) return undefined
+  return new InboxTakenError(username, suggestedUsernames(String(record?.fix ?? '')))
+}
+
+function safeParse(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Pull comma-separated usernames out of the `fix` sentence. */
+export function suggestedUsernames(fix: string): string[] {
+  const after = fix.split(/available\s*:/i)[1]
+  if (after === undefined) return []
+  return [
+    ...new Set(
+      after
+        .split(/[,\n]/)
+        // Cut a trailing sentence ("beta. Pick one.") at the sentence break,
+        // but never mid-token: an entry with a space in it is prose, not a
+        // username, and truncating it to its first word would invent one.
+        .map((s) => s.trim().split(/\.\s|\.$/)[0]!.trim())
+        .filter((s) => !/\s/.test(s) && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(s)),
+    ),
+  ]
 }
 
 /* ------------------------------------------------------------- mapping */
