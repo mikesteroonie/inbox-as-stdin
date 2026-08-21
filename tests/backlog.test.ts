@@ -47,6 +47,50 @@ describe('the dead-thread sweep runs on a timer (SPEC §4)', () => {
   })
 })
 
+describe('a refused subscription is a failure, not a quiet no-op', () => {
+  /**
+   * The daemon once logged "listening" for every inbox while the server was
+   * refusing each subscription, so no event ever arrived and nothing said so.
+   * `listen()` must reject, and the daemon must treat that as a failed
+   * connection worth retrying rather than a working one.
+   */
+  it('propagates a refused subscribe instead of reporting success', async () => {
+    const h = harness()
+    h.transport.refuseSubscribe()
+    await expect(h.transport.listen({ inboxIds: [BACKEND] }, () => undefined)).rejects.toThrow(
+      /cannot subscribe to pods/,
+    )
+  })
+
+  it('the daemon retries rather than sitting on a dead connection', async () => {
+    const h = harness()
+    h.transport.refuseSubscribe()
+    const waits: number[] = []
+    const daemon = new Daemon({
+      ...h,
+      sleep: async (ms) => {
+        waits.push(ms)
+        // Let it fail twice, then stop, so the test cannot hang.
+        if (waits.length >= 2) daemon.stop()
+      },
+      random: () => 0.5,
+    })
+    await daemon.run()
+    expect(waits.length).toBeGreaterThanOrEqual(2)
+    // Backoff, not a hot loop.
+    expect(waits[0]).toBeGreaterThanOrEqual(1000)
+  })
+
+  it('connects normally once the scope is accepted', async () => {
+    const h = harness()
+    h.transport.refuseSubscribe()
+    h.transport.allowSubscribe()
+    const sub = await h.transport.listen({ inboxIds: [BACKEND] }, () => undefined)
+    expect(sub).toBeDefined()
+    sub.stop()
+  })
+})
+
 describe('backlog recovery (§11)', () => {
   it('--once processes the whole backlog and exits', async () => {
     const h = harness()

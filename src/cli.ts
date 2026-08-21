@@ -585,16 +585,16 @@ program
       })
     }
 
-    await check('websocket', async () => {
-      const first = cfg.agents[0]!
-      const transport = transportFor(cfg, first.name)
-      const sub = await transport.listen(
-        { ...(cfg.pod_id ? { podId: cfg.pod_id } : {}), inboxIds: [inboxOf(first)] },
-        () => undefined,
-      )
-      sub.stop()
-      return 'connected and subscribed'
-    })
+    // Every inbox, not just the first: each connects with its own key, and a
+    // key that cannot subscribe is an agent that never wakes up.
+    for (const agent of cfg.agents) {
+      await check(`websocket (${agent.name})`, async () => {
+        const transport = transportFor(cfg, agent.name)
+        const sub = await transport.listen({ inboxIds: [inboxOf(agent)] }, () => undefined)
+        sub.stop()
+        return `subscribed to ${inboxOf(agent)}`
+      })
+    }
 
     if (!opts.skipRoundtrip) {
       // Q1 (§3): does the receive path preserve custom headers end-to-end?

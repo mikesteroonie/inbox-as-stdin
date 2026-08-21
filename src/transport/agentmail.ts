@@ -35,6 +35,9 @@ const log = logger('transport')
 /** Event types we subscribe to. Everything else is noise for this harness. */
 const EVENT_TYPES = ['message.received', 'message.bounced', 'message.rejected'] as const
 
+/** How long to wait for the server to confirm a subscription. */
+const SUBSCRIBE_TIMEOUT_MS = 15_000
+
 export interface AgentMailTransportOptions {
   apiKey: string
   /** Domain for inboxes created by `ensureInbox`. Defaults to the org default. */
@@ -115,33 +118,7 @@ export class AgentMailTransport implements MailTransport {
     })
 
     let stopped = false
-
-    socket.on('message', (raw) => {
-      const event = toMailEvent(raw)
-      if (event) onEvent(event)
-      else if (raw.type === 'error') {
-        hooks?.onError?.(new Error(`${raw.name}: ${raw.message}`))
-      } else if (raw.type === 'subscribed') {
-        log.info('subscribed', { pod: scope.podId ?? '(all)', inboxes: raw.inboxIds?.length ?? 0 })
-      }
-    })
-    socket.on('close', (event) => {
-      if (stopped) return
-      hooks?.onClose?.({ code: event.code, reason: event.reason })
-    })
-    socket.on('error', (err) => {
-      if (stopped) return
-      hooks?.onError?.(err)
-    })
-
-    socket.sendSubscribe({
-      type: 'subscribe',
-      eventTypes: [...EVENT_TYPES],
-      ...(scope.podId ? { podIds: [scope.podId] } : {}),
-      ...(scope.inboxIds?.length ? { inboxIds: scope.inboxIds } : {}),
-    })
-
-    return {
+    const subscription: Subscription = {
       stop: () => {
         stopped = true
         try {
@@ -151,6 +128,85 @@ export class AgentMailTransport implements MailTransport {
         }
       },
     }
+
+    /**
+     * Resolve only once the server confirms the subscription.
+     *
+     * An open socket is not a subscribed one: the server can accept the
+     * connection and then refuse the scope — an inbox-scoped key asking for a
+     * pod, for instance. Resolving on open reported success for a connection
+     * that would never deliver an event, which is exactly how a dead wake-up
+     * path reached production behind a green `doctor`.
+     */
+    return await new Promise<Subscription>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        subscription.stop()
+        reject(new Error('the server never confirmed the subscription (15s)'))
+      }, SUBSCRIBE_TIMEOUT_MS)
+      let settled = false
+
+      socket.on('message', (raw) => {
+        if (raw.type === 'subscribed') {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          log.info('subscribed', {
+            inboxes: raw.inboxIds?.length ?? 0,
+            pods: raw.podIds?.length ?? 0,
+          })
+          resolve(subscription)
+          return
+        }
+        if (raw.type === 'error') {
+          const err = new Error(`${raw.name}: ${raw.message}`)
+          if (!settled) {
+            settled = true
+            clearTimeout(timer)
+            subscription.stop()
+            reject(err)
+            return
+          }
+          hooks?.onError?.(err)
+          return
+        }
+        const event = toMailEvent(raw)
+        if (event) onEvent(event)
+      })
+      socket.on('close', (event) => {
+        if (!settled) {
+          settled = true
+          clearTimeout(timer)
+          reject(new Error(`the socket closed before subscribing (${event.code ?? 'no code'})`))
+          return
+        }
+        if (stopped) return
+        hooks?.onClose?.({ code: event.code, reason: event.reason })
+      })
+      socket.on('error', (err) => {
+        if (!settled) {
+          settled = true
+          clearTimeout(timer)
+          subscription.stop()
+          reject(err)
+          return
+        }
+        if (stopped) return
+        hooks?.onError?.(err)
+      })
+
+      socket.sendSubscribe({
+        type: 'subscribe',
+        eventTypes: [...EVENT_TYPES],
+        // Scope by inbox when we have inboxes: a per-inbox API key cannot
+        // subscribe to a pod, and per-inbox keys are the blast-radius story
+        // (SPEC §3). Pod scoping stays available for an org-scoped caller.
+        ...(scope.inboxIds?.length
+          ? { inboxIds: scope.inboxIds }
+          : scope.podId
+            ? { podIds: [scope.podId] }
+            : {}),
+      })
+    })
   }
 
   /* ---------------------------------------------------------------- read */
