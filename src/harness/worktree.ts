@@ -74,26 +74,55 @@ export async function ensureWorktree(opts: WorktreeOptions): Promise<Worktree> {
 
   await mkdir(dirname(path), { recursive: true })
   const base = opts.base ?? (await headRef(repo))
-  try {
+
+  const add = async (): Promise<void> => {
+    if (base === undefined) {
+      // An empty repository has no commit to branch from, so `HEAD` is not a
+      // reference yet and `worktree add … HEAD` fails outright. An orphan
+      // worktree is the supported way in: the agent starts from nothing, which
+      // is exactly right for "here is an empty repo, build me something".
+      try {
+        await git(repo, ['worktree', 'add', '--orphan', '-b', branch, path])
+      } catch (err) {
+        throw new Error(
+          `${repo} has no commits, and this git cannot create an orphan worktree ` +
+            `(needs 2.42+; got ${await gitVersion(repo)}). Make one commit in the repo — even an ` +
+            `empty README — and the task will run. Original error: ${(err as Error).message.split('\n')[0]}`,
+        )
+      }
+      return
+    }
     await git(repo, ['worktree', 'add', '-b', branch, path, base])
+  }
+
+  try {
+    await add()
   } catch (err) {
     // A stale registration from a previous run: prune and retry once.
     log.warn('worktree add failed, pruning and retrying', { taskId: opts.taskId, err: String(err) })
     await git(repo, ['worktree', 'prune'])
     await git(repo, ['branch', '-D', branch]).catch(() => undefined)
-    await git(repo, ['worktree', 'add', '-b', branch, path, base])
+    await add()
   }
-  log.info('worktree created', { taskId: opts.taskId, path, base })
+  log.info('worktree created', { taskId: opts.taskId, path, base: base ?? '(empty repo)' })
   return { taskId: opts.taskId, path, repo, branch }
 }
 
-async function headRef(repo: string): Promise<string> {
+async function gitVersion(repo: string): Promise<string> {
   try {
-    const { stdout } = await git(repo, ['rev-parse', 'HEAD'])
+    return (await git(repo, ['--version'])).stdout.trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** The commit to branch from, or undefined when the repository has no commits. */
+async function headRef(repo: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await git(repo, ['rev-parse', '--verify', 'HEAD'])
     return stdout.trim()
   } catch {
-    // An empty repository has no HEAD; branch from the unborn ref.
-    return 'HEAD'
+    return undefined
   }
 }
 

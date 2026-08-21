@@ -170,11 +170,56 @@ export async function dispatch(deps: Deps, event: MailEvent): Promise<DispatchRe
     return { disposition: 'sender-refused', detail: message.from }
   }
 
-  // 6 — route.
-  const question = routeToQuestion(deps, message, env)
-  if (question) return question(deps, agent, message, thread, env)
+  // 6 — route. Anything that throws past this point still owes the requester a
+  // reply: they sent mail and are waiting on one, and a stack trace in a log
+  // they cannot see is indistinguishable from the harness ignoring them.
+  try {
+    const question = routeToQuestion(deps, message, env)
+    if (question) return await question(deps, agent, message, thread, env)
+    return await runTaskInput(deps, agent, message, thread, env)
+  } catch (err) {
+    return reportFailure(deps, agent, message, err)
+  }
+}
 
-  return runTaskInput(deps, agent, message, thread, env)
+/**
+ * Turn an unhandled pipeline failure into a reply. The task is marked failed if
+ * one exists; either way the person who mailed in hears back.
+ */
+async function reportFailure(
+  deps: Deps,
+  agent: AgentConfig,
+  message: Message,
+  err: unknown,
+): Promise<DispatchResult> {
+  const detail = err instanceof Error ? err.message : String(err)
+  const task = deps.store.getActiveTaskByThread(message.threadId)
+  if (task) deps.store.updateTask(task.task_id, { state: 'failed' })
+  log.error('task failed before it could run', {
+    thread: message.threadId,
+    ...(task ? { taskId: task.task_id } : {}),
+    err: detail,
+  })
+
+  const transport = deps.transports.get(agent.name)
+  if (transport) {
+    await transport
+      .reply(inboxOf(agent), message.messageId, {
+        text:
+          `**I could not start this task.**\n\n${detail.split('\n')[0]}\n\n` +
+          `Nothing was changed. Fix the above and reply on this thread to try again.`,
+        cc: [deps.cfg.requester].filter((r) => normalizeAddress(r) !== normalizeAddress(message.from)),
+      })
+      .catch((replyErr: unknown) =>
+        log.error('could not report the failure by mail', { err: String(replyErr) }),
+      )
+    if (task?.thread_id) {
+      await transport
+        .label(inboxOf(agent), task.thread_id, [LABEL.failed], [LABEL.running])
+        .catch(() => undefined)
+    }
+  }
+  return { disposition: 'error', ...(task ? { taskId: task.task_id } : {}), detail }
 }
 
 /* ------------------------------------------------------------- routing */

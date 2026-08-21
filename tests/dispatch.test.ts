@@ -284,6 +284,36 @@ describe('SPEC §4 dead-thread TTL', () => {
   })
 })
 
+describe('a task that dies before it runs still tells the requester', () => {
+  /**
+   * A live run failed at worktree creation and the only trace was a stack in
+   * the daemon log. The requester had sent mail and got silence, which is
+   * indistinguishable from being ignored.
+   */
+  it('replies instead of throwing when the worktree cannot be made', async () => {
+    h = harness({}, '/definitely/not/a/repo')
+    h.runner = scripted([{ text: 'never runs' }])
+    const { event } = received()
+
+    const result = await dispatch(h, event)
+
+    expect(result.disposition).toBe('error')
+    const reply = h.transport.sent.find((s) => s.kind === 'reply')
+    expect(reply, 'the requester must hear back').toBeDefined()
+    expect(reply!.text).toContain('could not start this task')
+    expect(reply!.text).toContain('Nothing was changed')
+  })
+
+  it('does not leave the task looking live', async () => {
+    h = harness({}, '/definitely/not/a/repo')
+    h.runner = scripted([{ text: 'never runs' }])
+    await dispatch(h, received().event)
+    for (const task of h.store.listTasks()) {
+      expect(task.state, task.task_id).not.toBe('running')
+    }
+  })
+})
+
 describe('§5 bounce handling', () => {
   it('marks the task failed and notifies when a bounce matches no question', async () => {
     h.runner = scripted([{ text: 'done' }])
