@@ -122,7 +122,7 @@ tests/                vitest; policy.ts and envelope.ts held at 100% branch cove
 ## Development
 
 ```bash
-npm test              # 361 tests
+npm test              # 366 tests
 npm run test:watch
 npm run typecheck
 npm run build
