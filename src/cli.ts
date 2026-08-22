@@ -4,8 +4,8 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { appendFile, readFile, writeFile } from 'node:fs/promises'
-import { input, select } from '@inquirer/prompts'
+import { appendFile, readFile, rm, writeFile } from 'node:fs/promises'
+import { confirm, input, select } from '@inquirer/prompts'
 import { Command } from 'commander'
 import { stringify as toYaml } from 'yaml'
 import { apiKeyEnvName, apiKeyFor, budgetsFor, loadConfig, ConfigError, type HarnessConfig } from './config.js'
@@ -19,6 +19,7 @@ import { Store } from './store.js'
 import { AgentMailTransport } from './transport/agentmail.js'
 import { InboxTakenError, type MailTransport } from './transport/types.js'
 import { ANSWERS_PATH, DECISIONS_PATH, syncDecisions } from './harness/answers.js'
+import { removeWorktree } from './harness/worktree.js'
 
 const log = logger('cli')
 
@@ -189,7 +190,8 @@ program
     }
   })
 
-const tick = '\u2713'
+const TICK = '\u2713'
+const tick = TICK
 const bold = (text: string): string => `\u001b[1m${text}\u001b[0m`
 const dim = (text: string): string => `\u001b[2m${text}\u001b[0m`
 
@@ -500,6 +502,93 @@ function indent(text: string): string {
     .split('\n')
     .map((l) => `   ${l}`)
     .join('\n')
+}
+
+/* ---------------------------------------------------------------- reset */
+
+program
+  .command('reset')
+  .description('clear tasks, worktrees and history for a clean run — keeps harness.yaml and .env')
+  .option('-c, --config <path>', 'config path', 'harness.yaml')
+  .option('-y, --yes', 'skip the confirmation')
+  .option('--keep-answers', 'keep the answer cache and DECISIONS.md')
+  .option('--repos', 'also delete cloned repos, forcing a fresh clone')
+  .action(async (opts) => {
+    const cfg = load(opts.config)
+    const root = '.harness'
+
+    if (!opts.yes) {
+      const ok = await confirm({
+        message:
+          `Clear all tasks, worktrees and history for pod "${cfg.pod}"? ` +
+          `Inboxes and keys are untouched.`,
+        default: false,
+      }).catch(() => false)
+      if (!ok) {
+        console.log('Nothing was changed.')
+        return
+      }
+    }
+
+    // Remove worktrees through git so the source repo's registrations go too;
+    // deleting the directories alone leaves them listed in `git worktree list`
+    // and the next run with the same task id fails to re-create them.
+    const store = new Store(join(root, 'journal.db'))
+    let removed = 0
+    for (const task of store.listTasks()) {
+      if (!task.worktree || !existsSync(task.worktree)) continue
+      const agent = cfg.agents.find((a) => a.name === task.agent)
+      try {
+        await removeWorktree({
+          taskId: task.task_id,
+          path: task.worktree,
+          repo: agent ? resolveRepoPath(agent.repo, root) : task.worktree,
+          branch: `harness/${task.task_id}`,
+        })
+        removed++
+      } catch {
+        await rm(task.worktree, { recursive: true, force: true })
+        removed++
+      }
+    }
+    if (removed > 0) console.log(`  ${TICK} removed ${removed} worktree(s)`)
+
+    const counts = store.clearAll()
+    console.log(
+      `  ${TICK} cleared the journal (${counts.tasks} task(s), ${counts.seen} seen message(s), ` +
+        `${counts.questions} question(s))`,
+    )
+
+    // Point every cursor at now. Without this the next `up` would replay the
+    // whole mailbox — every old task and every doctor probe — because an
+    // absent cursor means "start from the beginning".
+    const now = Date.now()
+    for (const agent of cfg.agents) store.forceCursor(inboxOf(agent), now)
+    store.close()
+    console.log(`  ${TICK} cursors set to now — existing mail will not be replayed`)
+
+    await rm(join(root, 'wt'), { recursive: true, force: true })
+
+    if (!opts.keepAnswers) {
+      await rm(ANSWERS_PATH, { force: true })
+      await rm(DECISIONS_PATH, { force: true })
+      console.log(`  ${TICK} cleared the answer cache and ${DECISIONS_PATH}`)
+    }
+    if (opts.repos) {
+      await rm(join(root, 'repos'), { recursive: true, force: true })
+      console.log(`  ${TICK} removed cloned repos — the next task re-clones`)
+    }
+
+    console.log(`\nPod "${cfg.pod}" is clean. \`harness up\` starts fresh.`)
+  })
+
+/** Where a repo spec actually lives on disk, mirroring worktree.ts. */
+function resolveRepoPath(spec: string, root: string): string {
+  if (/^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/.test(spec)) {
+    const name = spec.replace(/\.git$/, '').split(/[/:]/).pop() || 'repo'
+    return join(root, 'repos', name)
+  }
+  return spec
 }
 
 /* ------------------------------------------------------------------ mcp */

@@ -162,6 +162,49 @@ describe('cursors (§11 backlog recovery)', () => {
   })
 })
 
+describe('reset', () => {
+  it('clears history but leaves cursors alone', () => {
+    const s = store()
+    s.createTask({ task_id: 'aaaaaaaa', thread_id: 'thr1', agent: 'backend' })
+    s.createQuestion({
+      question_id: 'q_aaaaaaaaaa',
+      task_id: 'aaaaaaaa',
+      asked_email: 'ada@example.com',
+      state: 'sent',
+      question: 'why?',
+    })
+    s.markSeen('m1')
+    s.putSession('thr1', { session_id: 'sess-1' })
+    s.bumpOutreach('ada@example.com')
+    s.claimNotice('aaaaaaaa', 'hop-limit')
+    s.setCursor('backend@agentmail.to', 5000)
+
+    const counts = s.clearAll()
+    expect(counts).toEqual({ tasks: 1, seen: 1, questions: 1 })
+    expect(s.listTasks()).toEqual([])
+    expect(s.hasSeen('m1')).toBe(false)
+    expect(s.getQuestion('q_aaaaaaaaaa')).toBeUndefined()
+    expect(s.getSession('thr1')).toBeUndefined()
+    expect(s.outreachCount('ada@example.com')).toBe(0)
+    expect(s.claimNotice('aaaaaaaa', 'hop-limit')).toBe(true)
+
+    // Cursors survive clearAll: dropping them would make the next run replay
+    // the entire mailbox, which is the opposite of a clean slate.
+    expect(s.getCursor('backend@agentmail.to')).toBe(5000)
+    s.close()
+  })
+
+  it('forceCursor moves a cursor backwards, which setCursor refuses to do', () => {
+    const s = store()
+    s.setCursor('backend@agentmail.to', 5000)
+    s.setCursor('backend@agentmail.to', 1000)
+    expect(s.getCursor('backend@agentmail.to')).toBe(5000)
+    s.forceCursor('backend@agentmail.to', 1000)
+    expect(s.getCursor('backend@agentmail.to')).toBe(1000)
+    s.close()
+  })
+})
+
 describe('notices (§5.5 once per task)', () => {
   it('claims once', () => {
     const s = store()
