@@ -4,7 +4,7 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { appendFile, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { confirm, input, select } from '@inquirer/prompts'
 import { Command } from 'commander'
 import { stringify as toYaml } from 'yaml'
@@ -40,11 +40,27 @@ program
   .option('--agents <names>', 'comma-separated agent names')
   .option('--domain <domain>', 'inbox domain (defaults to the AgentMail org default)')
   .option('-y, --yes', 'accept every default without prompting (scripts, CI)')
+  .option('-f, --force', 'run the setup flow again, backing up the existing config')
   .action(async (opts) => {
     try {
+      if (existsSync(opts.config) && opts.force) {
+        // Keep the old config rather than overwriting it: it names inboxes
+        // that exist and keys that still work, and a demo is exactly when
+        // someone will want yesterday's pod back.
+        const backup = `${opts.config}.${new Date().toISOString().replace(/[:.]/g, '-')}.bak`
+        await rename(opts.config, backup)
+        console.log(`Moved the existing config to ${backup}\n`)
+      }
       if (existsSync(opts.config)) {
-        console.error(`${opts.config} already exists. Move it aside first.`)
-        process.exitCode = 1
+        const cfg = loadConfig(opts.config)
+        console.log(`${opts.config} already exists — pod "${cfg.pod}" is set up:`)
+        for (const a of cfg.agents) console.log(`  ${inboxOf(a)}  ${dim(a.display_name ?? a.name)}`)
+        console.log(
+          `\n  ${bold('harness doctor')}      check it still works\n` +
+            `  ${bold('harness up')}          start the daemon\n` +
+            `  ${bold('harness reset')}       clear tasks and history for a clean run\n` +
+            `  ${bold('harness init -f')}     set up a new pod, keeping this config as a backup`,
+        )
         return
       }
       const orgKey = process.env.AGENTMAIL_API_KEY
@@ -392,6 +408,21 @@ program
       `harness up — pod ${cfg.pod}, ${cfg.agents.length} agent(s), ` +
         `$${budgets.usd}/task, ${budgets.maxConcurrent} concurrent. Ctrl-C to stop.`,
     )
+
+    // Say plainly that idle is the working state. Three log lines and then
+    // silence looks identical to a hang, and the reflex is to kill it and
+    // re-run init — which is the one thing that cannot help.
+    const ready = setTimeout(() => {
+      console.log(`\n${bold('Waiting for mail.')} Nothing prints here until a message arrives.`)
+      console.log('\nEmail a task to:')
+      for (const a of cfg.agents) console.log(`  ${inboxOf(a)}  ${dim(a.display_name ?? a.name)}`)
+      console.log(
+        `\nOr, without a mail client:  ${bold(`harness send "your task" --to ${cfg.agents[0]!.name}`)}`,
+      )
+      console.log(`Watch state in another terminal:  ${bold('harness tail')}\n`)
+    }, 1_500)
+    ready.unref?.()
+
     await daemon.run()
     store.close()
   })
