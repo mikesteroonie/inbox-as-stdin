@@ -355,6 +355,38 @@ export class Store {
       .run(inboxId, at)
   }
 
+  /* -------------------------------------------------------------- reset */
+
+  /**
+   * Wipe everything the journal remembers except the per-inbox cursors, which
+   * the caller re-points at "now". Clearing those too would make the next
+   * `up` replay the entire mailbox from the beginning — every old task, every
+   * doctor probe — which is the opposite of a clean slate.
+   */
+  clearAll(): { tasks: number; seen: number; questions: number } {
+    return this.tx(() => {
+      const counts = {
+        tasks: (this.db.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }).n,
+        seen: (this.db.prepare('SELECT COUNT(*) AS n FROM seen').get() as { n: number }).n,
+        questions: (this.db.prepare('SELECT COUNT(*) AS n FROM questions').get() as { n: number }).n,
+      }
+      for (const table of ['tasks', 'seen', 'questions', 'sessions', 'outreach_budget', 'notices']) {
+        this.db.prepare(`DELETE FROM ${table}`).run()
+      }
+      return counts
+    })
+  }
+
+  /** Move a cursor to `at` even if that is backwards — reset's one exception. */
+  forceCursor(inboxId: string, at: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO cursors (inbox_id, last_event_at) VALUES (?, ?)
+         ON CONFLICT(inbox_id) DO UPDATE SET last_event_at = excluded.last_event_at`,
+      )
+      .run(inboxId, at)
+  }
+
   /* ------------------------------------------------------------ notices */
 
   /** True the first time this (task, kind) notice fires — "once per task" (§5.5). */
