@@ -59,6 +59,40 @@ describe('ensureWorktree', () => {
     expect(existsSync(join(again.path, 'scratch.txt'))).toBe(true)
   })
 
+  it('refreshes a clone instead of freezing it at first fetch', async () => {
+    // The demo case: the repo is cloned while empty, someone pushes, and the
+    // next task must see the new commit. A clone that is only ever reused
+    // serves code that no longer exists, silently and forever.
+    const remote = mkdtempSync(join(tmpdir(), 'wt-remote-'))
+    execFileSync('git', ['init', '-q', '--bare', '.'], { cwd: remote })
+    const url = `file://${remote}`
+    const r = root()
+
+    const first = await ensureWorktree({ repo: url, taskId: 'eeeeeeee', root: r })
+    expect(existsSync(first.path)).toBe(true)
+    expect(existsSync(join(first.path, 'retry.js'))).toBe(false)
+
+    // Someone pushes.
+    const work = mkdtempSync(join(tmpdir(), 'wt-work-'))
+    execFileSync('git', ['clone', '-q', url, '.'], { cwd: work })
+    writeFileSync(join(work, 'retry.js'), 'export const RETRY_CAP = 3\n')
+    execFileSync('git', ['add', '-A'], { cwd: work })
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-qm', 'add cap'], {
+      cwd: work,
+    })
+    execFileSync('git', ['push', '-q', 'origin', 'HEAD:main'], { cwd: work })
+
+    const second = await ensureWorktree({ repo: url, taskId: 'ffffffff', root: r })
+    expect(existsSync(join(second.path, 'retry.js')), 'the new commit must be visible').toBe(true)
+  })
+
+  it('treats a file:// url as a repo to clone, not a local path', async () => {
+    const remote = mkdtempSync(join(tmpdir(), 'wt-remote-'))
+    execFileSync('git', ['init', '-q', '--bare', '.'], { cwd: remote })
+    const wt = await ensureWorktree({ repo: `file://${remote}`, taskId: 'gggggggg', root: root() })
+    expect(existsSync(wt.path)).toBe(true)
+  })
+
   it('refuses a path that is not a git repository, by name', async () => {
     const notARepo = mkdtempSync(join(tmpdir(), 'not-a-repo-'))
     await expect(

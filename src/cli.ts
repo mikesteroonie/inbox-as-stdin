@@ -584,7 +584,7 @@ program
 
 /** Where a repo spec actually lives on disk, mirroring worktree.ts. */
 function resolveRepoPath(spec: string, root: string): string {
-  if (/^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/.test(spec)) {
+  if (/^(https?:\/\/|git@|ssh:\/\/|git:\/\/|file:\/\/)/.test(spec)) {
     const name = spec.replace(/\.git$/, '').split(/[/:]/).pop() || 'repo'
     return join(root, 'repos', name)
   }

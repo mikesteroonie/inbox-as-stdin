@@ -64,7 +64,7 @@ export interface WorktreeOptions {
  */
 export async function ensureWorktree(opts: WorktreeOptions): Promise<Worktree> {
   const root = resolve(opts.root ?? '.harness')
-  const repo = await ensureRepo(opts.repo, root)
+  const { path: repo, cloned } = await ensureRepo(opts.repo, root)
   const path = join(root, 'wt', opts.taskId)
   const branch = `harness/${opts.taskId}`
 
@@ -73,7 +73,10 @@ export async function ensureWorktree(opts: WorktreeOptions): Promise<Worktree> {
   }
 
   await mkdir(dirname(path), { recursive: true })
-  const base = opts.base ?? (await headRef(repo))
+  // A clone we manage is branched from the remote's tip, not from whatever it
+  // held when it was first fetched; a repo the operator pointed us at is
+  // branched from their HEAD, since that is the state they are looking at.
+  const base = opts.base ?? (cloned ? await remoteHead(repo) : await headRef(repo))
 
   const add = async (): Promise<void> => {
     if (base === undefined) {
@@ -126,23 +129,63 @@ async function headRef(repo: string): Promise<string | undefined> {
   }
 }
 
-/** Clone a URL once into `.harness/repos/<name>`; pass local paths through. */
-async function ensureRepo(repoSpec: string, root: string): Promise<string> {
-  const looksRemote = /^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/.test(repoSpec)
+/**
+ * Clone a URL into `.harness/repos/<name>`, or pass a local path through.
+ *
+ * An existing clone is fetched rather than reused as-is. Without that a clone
+ * is frozen at the moment it was first made — push a commit and the agent
+ * keeps working from code that no longer exists, silently, forever.
+ */
+async function ensureRepo(repoSpec: string, root: string): Promise<{ path: string; cloned: boolean }> {
+  const looksRemote = /^(https?:\/\/|git@|ssh:\/\/|git:\/\/|file:\/\/)/.test(repoSpec)
   if (!looksRemote) {
     const path = isAbsolute(repoSpec) ? repoSpec : resolve(repoSpec)
     if (!(await isGitRepo(path))) {
       throw new Error(`agent repo is not a git repository: ${path}`)
     }
-    return path
+    return { path, cloned: false }
   }
   const name = repoSpec.replace(/\.git$/, '').split(/[/:]/).pop() || 'repo'
   const dest = join(root, 'repos', name)
-  if (existsSync(join(dest, '.git'))) return dest
+
+  if (existsSync(join(dest, '.git'))) {
+    try {
+      await git(dest, ['fetch', 'origin', '--prune'])
+      log.debug('fetched repo', { repo: repoSpec })
+    } catch (err) {
+      // Offline, or the remote is gone. The existing clone is still workable,
+      // so carry on rather than failing the task — but say so, because the
+      // agent is about to read code that may be behind.
+      log.warn('could not fetch the repo; working from the existing clone', {
+        repo: repoSpec,
+        err: String(err).split('\n')[0],
+      })
+    }
+    return { path: dest, cloned: true }
+  }
+
   await mkdir(dirname(dest), { recursive: true })
   log.info('cloning repo', { repo: repoSpec, dest })
   await git(root, ['clone', repoSpec, dest])
-  return dest
+  return { path: dest, cloned: true }
+}
+
+/**
+ * The remote's current tip. Falls back through the usual default-branch names
+ * and finally to the local HEAD, so a clone made while the remote was empty
+ * still resolves once the remote has commits.
+ */
+async function remoteHead(repo: string): Promise<string | undefined> {
+  for (const ref of ['origin/HEAD', 'origin/main', 'origin/master']) {
+    try {
+      const { stdout } = await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`])
+      const sha = stdout.trim()
+      if (sha) return sha
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return headRef(repo)
 }
 
 /**
